@@ -1,0 +1,117 @@
+# Perses and Syntax-Guided Reduction
+
+Delta debugging will reduce any input — it just will not know what it is reducing. Perses adds grammar structure to the search, and that changes which candidates the reducer tests.
+
+A program has structure. It has declarations, statements, expressions, blocks, identifiers, literals, and punctuation. A syntax-guided reducer uses that structure to generate candidates that are more likely to remain syntactically valid.
+
+As Chapter 5 illustrated, text-level reduction wastes oracle calls on syntactically broken candidates — the compiler rejects them before reaching the bug. Too many invalid candidates make the reducer spend most of its effort on dead ends.
+
+## How Syntax Guides Reduction
+
+A syntax-guided reducer uses grammar structure to choose more meaningful reduction units.
+
+Instead of deleting arbitrary characters, it may try to remove:
+
+- a statement;
+- a declaration;
+- an expression subtree;
+- an argument;
+- a list element;
+- a block.
+
+For the same program, a syntax-guided candidate might be:
+
+```c
+int main(void) {
+  return 1 + 2;
+}
+```
+
+or:
+
+```c
+int main(void) {
+  int x = 1;
+  return x;
+}
+```
+
+These candidates may or may not preserve the target failure, but they are at least shaped like programs. That gives the oracle a chance to test the behavior we care about.
+
+The syntax-guided perspective can be imagined as a tree:
+
+```text
+function_definition
+  |
+  +-- return_type: int
+  +-- name: main
+  +-- parameters: void
+  +-- body
+       |
+       +-- declaration: int x = 1 + 2;
+       +-- return_statement: return x;
+```
+
+Reduction can now operate over tree nodes rather than raw text spans. Removing a node such as the declaration is different from removing the middle of a token sequence. The reducer can ask questions that better match the language:
+
+- Can this declaration be removed?
+- Can this expression be simplified?
+- Can this list be shortened?
+- Can this subtree be replaced by a smaller subtree?
+
+Perses uses syntax information from grammars to guide this search [@perses]. Algorithmically, two ideas distinguish Perses from a plain HDD-style reducer:
+
+- **Perses normal form.** ANTLR grammars often express lists and optional elements through recursion or Kleene closures. Perses rewrites the grammar into a normal form that makes lists first-class — the reducer can shorten a list by one element directly, without per-language code for "a `statement_list` is special."
+- **Priority-queue traversal.** Instead of visiting tree nodes in a fixed level-by-level order (HDD's approach), Perses keeps a priority queue ordered by subtree size and tries the largest subtree first. Removing a large subtree at the top of the priority queue shrinks the program quickly when the removal succeeds, and the queue updates after every accept.
+
+Perses gains three practical advantages from syntax guidance.
+
+First, it avoids generating candidates the parser would immediately reject. The original Perses paper reports the rate of grammatically valid candidates is substantially higher than for text-level reducers on the same inputs [@perses]; the exact gain depends on input language and reducer baseline, but the direction is consistent.
+
+Second, it makes reduction more language-agnostic. If a language can be parsed with suitable grammar support, Perses can reuse the same reduction strategy across languages.
+
+Third, it creates a foundation for later transformations. Once the reducer can see syntax, later Perses-family work can ask how to improve minimality, rewrite structure, use lexical guidance, cache repeated tests, or guide the search with learned signals.
+
+## What Syntax Does Not Solve
+
+Syntax guidance avoids most invalid candidates. It does not avoid semantically invalid ones.
+
+A syntactically valid program may still be semantically invalid. For example, removing a declaration may leave a variable use with no definition:
+
+```c
+int main(void) {
+  return x;
+}
+```
+
+This program has recognizable C syntax, but it does not type-check. If the target failure occurs after type checking, this candidate may still be useless.
+
+This distinction is important:
+
+| Kind of Validity | Example Question |
+| --- | --- |
+| Lexical validity | Are the tokens well-formed? |
+| Syntactic validity | Does the program parse? |
+| Semantic validity | Do names, types, and scopes make sense? |
+| Behavioral preservation | Does the candidate still trigger the target failure? |
+
+Perses mainly attacks the syntax problem. The oracle remains responsible for deciding whether a candidate preserves the target behavior.
+
+## Syntax-Guided Reduction in Context
+
+Delta Debugging introduced the idea of systematic reduction guided by an interestingness test. Hierarchical Delta Debugging moved the reduction unit from flat text chunks toward tree structure.
+
+Perses continues this line but makes syntax guidance central and language-agnostic. The shift is not just to use a tree, but to use grammar-derived syntax structure — pruning invalid candidates and supporting reduction across languages from the same engine.
+
+Perses and its family raise several design questions that will return throughout the book:
+
+- How much language knowledge should a reducer require?
+- Should reduction preserve syntax only, or also semantic constraints?
+- How should reduction balance speed, smallness, and readability?
+- Which transformations are safe enough to apply automatically?
+- What should count as a fair comparison between reducers?
+- How close can a practical reducer get to one-minimality?
+
+In the gcc-59903 example, the input is a C program and the grammar is the C grammar. Perses parses `small.c` into a parse tree and tries removing subtrees — whole statements, declarations, expressions — rather than arbitrary byte ranges. The reduction in Chapter 4 therefore tests many candidates that preserve parse-level structure rather than a long sequence of broken byte strings. Some candidates can still be semantically invalid, or invalid for the target compiler mode; the oracle decides which structured candidates still preserve the failure.
+
+The next chapter zooms out from this one algorithm to the larger Perses family — the variants that trade smallness against speed, the ones that add caching or learning, and the ones that target specific input domains. Chapter 8 then formalizes the notion of "smaller" that all of these reducers are chasing, including why no practical reducer reaches the true minimum.

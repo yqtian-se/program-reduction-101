@@ -1,0 +1,62 @@
+project:
+  type: book
+
+book:
+  title: "Program Reduction 101"
+  subtitle: "From Delta Debugging to Perses and Syntax-Guided Reducers"
+  author: "Yongqiang Tian"
+  date: 2026-05-12
+  description: "A practical and research-oriented introduction to program reduction, from Delta Debugging to Perses and syntax-guided reducers."
+  repo-url: https://github.com/yqtian-se/program-reduction-101
+  page-footer:
+    center: "Questions or suggestions? Contact yongqiang.tian@monash.edu."
+  chapters:
+    - index.qmd
+    - chapters/preface.qmd
+    - part: "Foundations and Motivation"
+      chapters:
+        - chapters/01-why-program-reduction.qmd
+        - chapters/02-meet-perses.qmd
+        - chapters/03-test-oracles.qmd
+        - chapters/04-your-first-perses-reduction.qmd
+    - part: "How Program Reduction Works"
+      chapters:
+        - chapters/05-delta-debugging.qmd
+        - chapters/06-perses-and-syntax-guided-reduction.qmd
+        - chapters/07-the-perses-family.qmd
+        - chapters/08-reduction-problem-and-minimality.qmd
+        - chapters/09-evaluating-reducers.qmd
+    - part: "Related Tools and Algorithms"
+      chapters:
+        - chapters/10-hierarchical-delta-debugging.qmd
+        - chapters/11-c-reduce-and-compiler-testcase-reduction.qmd
+        - chapters/12-picireny-and-grammar-based-reduction.qmd
+        - chapters/13-minimality-search-and-transformation-power.qmd
+    - part: "Practice"
+      chapters:
+        - chapters/14-writing-robust-oracles.qmd
+        - chapters/15-handling-flaky-or-slow-failures.qmd
+        - chapters/16-reducing-compiler-and-interpreter-bugs.qmd
+        - chapters/17-adding-language-support.qmd
+    - part: "Research Map"
+      chapters:
+        - chapters/18-open-problems.qmd
+    - chapters/glossary.qmd
+    - chapters/citing-this-book-and-perses.qmd
+    - chapters/references.qmd
+
+bibliography: bibliography/references.bib
+
+format:
+  html:
+    theme:
+      light: [cosmo, assets/custom.scss]
+      dark: [darkly, assets/custom.scss]
+    toc: true
+    code-copy: true
+    number-sections: true
+  pdf:
+    documentclass: scrreprt
+
+execute:
+  freeze: auto

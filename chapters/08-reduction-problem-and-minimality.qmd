@@ -1,0 +1,127 @@
+# The Reduction Problem and Minimality
+
+Program reduction sounds simple: make a failing input smaller while keeping the failure. The difficulty is hidden in the word "keeping." What exactly must be preserved? How small is small enough? Which transformations are allowed? How do we know when the reducer is done?
+
+The reduction problem and the main minimality vocabulary give us a way to answer those questions without treating every small output as a successful reduction.
+
+## The Reduction Problem
+
+A reduction task has four parts:
+
+| Part | Meaning | Example |
+| --- | --- | --- |
+| Original input | The artifact that triggers the behavior | a generated C program |
+| Interestingness test | The oracle that decides whether a candidate still matters | `test.sh` |
+| Transformation space | The edits the reducer is allowed to try | deletion, replacement, simplification |
+| Cost measure | How the reducer judges smaller or better | bytes, tokens, AST nodes, lines |
+
+The reducer searches for a candidate that is smaller under the cost measure and still passes the interestingness test.
+
+```text
+original input + oracle + transformations + cost measure
+                         |
+                         v
+                 smaller interesting input
+```
+
+Smallness is not universal. Different reducers may optimize different size measures:
+
+- number of bytes;
+- number of characters;
+- number of tokens;
+- number of lines;
+- number of syntax-tree nodes;
+- number of semantic entities;
+- human readability.
+
+These measures can disagree. A one-line program may be short by line count but dense and unreadable. A formatted program may be longer in bytes but easier for a developer to debug.
+
+For example, a reducer might turn a readable five-line function into one line of nested operators. That is an improvement by line count, but not necessarily an improvement for a maintainer trying to understand a miscompilation.
+
+For compiler testing, the best reduced program is often the smallest useful explanation of the bug, not necessarily the mathematically shortest string.
+
+The oracle defines what the reducer is trying to preserve.
+
+If the oracle checks for any compiler failure, the reducer may return a tiny syntax error. If the oracle checks for a specific optimizer assertion, the reducer has a sharper target.
+
+Every reduction result should be interpreted relative to its oracle:
+
+```text
+small under which measure?
+interesting under which test?
+valid under which language assumptions?
+useful for which reader?
+```
+
+Without those qualifications, claims about reduction quality can be misleading.
+
+## Local Minimality
+
+A reduced input is locally minimal when the reducer cannot improve it using the transformations it is currently trying. ("Local minimality" is the term this book uses for the fixed-point of a reducer's transformation operator; the broader DD literature uses the more precise *n-minimal* family of definitions — see below.)
+
+Local minimality depends on the transformation space. If a reducer only deletes lines, then "minimal" means no more useful line deletion was found. Another reducer that can simplify expressions or remove syntax-tree nodes may still reduce the same input further.
+
+That makes reducer comparison subtle. A stronger transformation space can make a reducer look better, but it may also require more language knowledge, more engineering effort, or more oracle calls.
+
+## One-Minimality
+
+One-minimality is a common practical target.
+
+An input is one-minimal with respect to a set of units if removing any single unit makes the input uninteresting.
+
+For example:
+
+```text
+[A] [B] [C]
+```
+
+If the oracle rejects:
+
+```text
+[B] [C]
+[A] [C]
+[A] [B]
+```
+
+then `[A] [B] [C]` is one-minimal under that unit definition.
+
+But one-minimality is not global minimality. The input may still be reducible by:
+
+- removing two units together;
+- replacing a large unit with a smaller one;
+- simplifying a subtree;
+- applying a domain-specific transformation;
+- changing the representation.
+
+The Perses-family work on one-minimality and transformation power matters for this reason.
+
+## Global Minimality
+
+Global minimality means the reducer has found the smallest possible interesting input under a chosen cost measure and transformation universe.
+
+That is a beautiful definition and a brutal goal.
+
+For realistic programs, global minimality is usually too expensive to guarantee. The search space is enormous, oracle calls are costly, and the relationship between program structure and failure behavior can be highly nonlocal.
+
+In practice, reducers aim for useful approximations:
+
+- small enough for debugging;
+- stable enough for regression testing;
+- faithful enough to the original failure;
+- cheap enough to compute.
+
+## Why This Matters for Perses
+
+A candidate can be small but invalid, valid but uninteresting, interesting but unreadable, or readable but still too large. The most useful result balances several goals at once. *Interestingness*: does it preserve the target behavior? *Syntactic validity*: does it parse? *Semantic validity*: does it pass the necessary language checks? *Size*: is it significantly smaller? *Readability*: can a human understand it? *Reproducibility*: can others rerun the failure?
+
+**The 26-line gcc-59903 result through this lens.** The reduced program from Chapter 4 sits at a useful approximation, not at any one absolute minimum:
+
+- *Locally minimal under Perses's transformation space*: yes — Perses's grammar-guided deletions cannot shrink it further. Every parse-tree node has been tried.
+- *One-minimal under tree-node removal*: yes by construction — removing any single remaining node loses the ICE.
+- *Globally minimal*: no. C-Reduce's expression simplification and declaration cleanup (Chapter 11) typically reach <10 lines on Csmith-style inputs. The 26-line result is what a deletion-only reducer with the C grammar can do; a richer transformation space can do better.
+
+So "minimal" is always *minimal-with-respect-to-something*: a transformation space, a unit definition, a cost measure, and an oracle. The 26-line program is minimal for Perses on gcc-59903 with the simple oracle. Change any of those four parameters and the minimum changes too.
+
+Perses mainly helps by using syntax to improve the candidate space. The oracle decides interestingness. The human reader still judges usefulness. Perses gives a syntax-guided foundation for language-agnostic reduction [@perses]; its research family — surveyed in Chapter 7 — can each be read as targeting one piece of the reduction problem: a richer transformation space, a smarter search strategy, lower oracle cost, or stronger minimality guarantees.
+
+These terms — local minimality, one-minimality, global minimality, cost measure, transformation space — are the comparison language for the rest of the book. Chapter 9 turns them into measurable axes for evaluation; Chapter 13 returns to the trade-off between minimality and runtime when Vulcan, T-Rec, and the caching schemes are compared side by side.

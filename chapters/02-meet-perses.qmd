@@ -1,0 +1,74 @@
+# Meet Perses
+
+You have a program that crashes a compiler. You do not have time to read 3,000 lines. Perses is the tool that does the shrinking for you.
+
+Perses needs two things from you: a failure-inducing input and a test script that recognizes the failure. With those in place, Perses searches for smaller inputs that still pass the script. Chapter 3 explains how that script defines success. Chapter 4 then runs Perses on the gcc-59903 example.
+
+At its core, Perses follows a simple loop:
+
+- take the failure-inducing program as input;
+- use a test script to define what behavior must be preserved;
+- repeatedly propose smaller candidates and test each one;
+- output a reduced program that still passes the test.
+
+Perses starts from one observation: programs have syntax. A reducer that understands syntax can skip many candidates that the parser would immediately reject, and spend its oracle calls on candidates that might still reach the failure.
+
+## What Perses Needs
+
+From the user's perspective, Perses is a command-line tool with two essential
+inputs. One is the original bug-triggering program, such as `failure.c`. The
+other is a test script, such as `test.sh`, that decides whether a candidate
+still exhibits the target behavior.
+
+The output is a smaller version of the input program that still passes the test
+script. In other words, Perses does not produce an explanation by itself; it
+produces a reduced artifact that a developer, tester, or researcher can inspect,
+turn into a bug report, or keep as a regression test.
+
+The test script returns `0` when the candidate is still interesting. For a
+compiler crash, it might compile the candidate and check whether the same crash
+still appears. For a parser bug, it might check whether the parser reaches the
+same assertion. For a miscompilation, it might compare outputs from two compiler
+configurations.
+
+Perses — and almost all reducers — does not need to know what the bug means. It only needs a reliable test script. This is an important division of responsibility: the user defines the behavior worth preserving, and the reducer searches for smaller inputs that preserve it.
+
+A typical test script is deliberately small in interface: it exits with `0`
+only when the candidate should be kept. That small interface is the bridge to
+Chapter 3. Before we run Perses, we need to understand exactly what the script
+is promising.
+
+## Syntax-Guided and Language-Agnostic
+
+The Perses documentation lists support for many languages and input formats, including C, C++, Java, JavaScript, Python, Rust, Go, SMT-LIB, Solidity, WebAssembly, XML, SQL dialects, and others.
+
+The important point is not that Perses has a hand-written reducer for each language. Perses is language-agnostic: once a suitable [ANTLR](https://www.antlr.org/) grammar — ANTLR is a widely used parser-generator framework — is available to parse the program, Perses can use the same syntax-guided reduction strategy across different languages [@perses]. [Perses and Syntax-Guided Reduction](06-perses-and-syntax-guided-reduction.qmd) explains how that syntax guidance works.
+
+For now, keep the division of labor in mind: Perses supplies the search strategy, the grammar supplies structure, and the test script supplies meaning.
+
+## Getting Perses
+
+Perses is open source and available at
+[github.com/uw-pluverse/perses](https://github.com/uw-pluverse/perses).
+
+There are three common ways to get it:
+
+**Prebuilt jar.** The quickest route is to download
+`perses_deploy.jar` from the
+[GitHub releases page](https://github.com/uw-pluverse/perses/releases).
+You need a Java runtime (11 or later). This is the normal path when you already
+have a local failure and a test script.
+
+**Docker image (for reproducing this book's examples).** To follow along with
+the gcc-59903 walkthrough in Chapter 4 — or to run any of the other benchmarks
+in the book — use the WeightDD Docker image. It bundles Perses with GCC 4.8.2
+and the full benchmark suite so the results are reproducible without managing
+compiler versions manually:
+
+```bash
+docker pull wddartifact/wdd
+```
+
+**Build from source.** If you want to modify Perses or experiment with
+unreleased features, clone the repository and build with Bazel following the
+[instructions in the repository](https://github.com/uw-pluverse/perses).

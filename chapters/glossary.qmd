@@ -1,0 +1,239 @@
+# Glossary {.unnumbered}
+
+This glossary records the terms readers need in order to understand Perses and the broader program-reduction literature.
+
+## Program Reduction
+
+The process of transforming a large input into a smaller input while preserving a property of interest, such as a compiler crash, parser failure, miscompilation, or verifier result.
+
+## Reducer
+
+A tool or algorithm that performs program reduction. A reducer repeatedly proposes candidate inputs and asks whether each candidate still preserves the interesting behavior.
+
+## Candidate
+
+A proposed reduced version of the original input. A candidate may be accepted if it passes the interestingness test.
+
+## Transformation Space
+
+The set of edits a reducer is allowed to try. Examples include deleting text, removing syntax-tree nodes, simplifying expressions, replacing subtrees, and applying template-based transformations.
+
+## Cost Measure
+
+The measure used to decide whether one candidate is smaller or better than another. Examples include bytes, lines, tokens, parse-tree nodes, AST nodes, oracle calls, or human readability.
+
+## Interestingness Test
+
+An executable test that decides whether a candidate still has the property the reducer should preserve. In practice, this is often a shell script that runs the target tool and checks for a specific output, crash, or behavior.
+
+For Perses, the usual convention is that the script exits with `0` when the candidate is interesting and nonzero otherwise.
+
+## Oracle
+
+The decision procedure used by the reducer to classify a candidate as interesting or uninteresting. In many reduction workflows, the oracle is the same as the interestingness test.
+
+## Oracle Call
+
+One execution of the interestingness test on a candidate. Oracle calls are often a major cost in program reduction because each call may run a compiler, analyzer, solver, or test suite.
+
+## Failure-Inducing Input
+
+An input that triggers the behavior being investigated. Examples include a program that crashes a compiler or a file that exposes a parser bug.
+
+## Internal Compiler Error (ICE)
+
+A failure in the compiler itself rather than in the input program. The compiler typically reports an assertion failure, segmentation fault, or unreachable-code abort. ICEs are common targets for compiler-testing workflows because they are reproducible and unambiguously bugs.
+
+## CSmith
+
+A random C program generator widely used in compiler-testing research. CSmith generates C programs that avoid undefined behavior, allowing differential testing of compilers. Many failure-inducing inputs studied in the reduction literature — including this book's running example, gcc-59903 — originate from CSmith [@csmith].
+
+## CompCert
+
+A formally verified C compiler. CompCert's output is provably correct relative to a formal semantics of C, which makes it useful as a *trusted reference* in differential testing oracles: if a candidate produces different output under CompCert versus the buggy compiler, the bug is more likely to be real.
+
+## Undefined Behavior (UB)
+
+A program construct that the language standard does not constrain. UB programs can produce arbitrary output, crash, or behave inconsistently across compilers — none of which is a compiler bug. A robust compiler-testing oracle filters out UB-heavy candidates before checking the target failure.
+
+## Delta Debugging
+
+A classic reduction technique that repeatedly partitions an input and tests whether subsets or complements preserve the interesting behavior.
+
+## ddmin
+
+The original Delta Debugging algorithm by Zeller and Hildebrandt [@zeller2002simplifying]. Given a failing input, `ddmin` repeatedly tests subsets and complements; when no single partition can be removed, it doubles the granularity and continues. The algorithm terminates at a 1-minimal input in worst-case O(n²) oracle calls.
+
+## One-Minimality
+
+A reduced input is one-minimal if removing any single remaining unit would make it uninteresting. One-minimality is weaker than global minimality, but it is often a practical target.
+
+## Global Minimality
+
+The property of being the smallest possible interesting input under a chosen size measure. This is usually expensive or infeasible to guarantee for realistic program reduction tasks.
+
+## Local Minimality
+
+The property that a reducer cannot improve an input using the transformations it is currently trying. Local minimality depends on the reducer's transformation space.
+
+## Reduction Unit
+
+The basic element a reducer tries to remove or transform. Depending on the reducer, a unit may be a character, token, line, syntax-tree node, grammar production, or transformation target.
+
+## Syntax-Guided Reduction
+
+Reduction that uses grammar or syntax information to produce candidates that are more likely to remain syntactically valid.
+
+## Language-Agnostic Reduction
+
+Reduction designed to work across multiple programming languages, usually by relying on grammars, parser generators, tokenization, or reusable transformation strategies rather than handwritten logic for one language.
+
+## Parse Tree
+
+A tree representation of how an input conforms to a grammar. Syntax-guided reducers can use parse trees to remove or transform meaningful syntactic units.
+
+## Abstract Syntax Tree
+
+A tree representation of the semantic structure of a program, often simplified compared with the parse tree. Program-analysis tools often use ASTs, while grammar-driven reducers may work closer to parse trees.
+
+## Grammar
+
+A formal description of valid syntax for a language or input format. Grammars are central to language-agnostic syntax-guided reduction.
+
+## ANTLR
+
+A widely used parser-generator framework (ANother Tool for Language Recognition). ANTLR consumes a grammar file and produces a parser; Perses uses ANTLR4 grammars to support new languages. A language gains Perses support primarily by supplying an ANTLR4 grammar that parses real-world inputs.
+
+## Perses Normal Form
+
+A representation of an ANTLR grammar in which Kleene closures (lists, optional elements) are first-class objects the reducer can shorten directly. Perses operates over parse trees in this normal form, which is what makes language-agnostic list reduction possible without per-language code [@perses].
+
+## Token
+
+A lexical unit of an input, such as an identifier, keyword, operator, literal, or punctuation symbol.
+
+## Lexical Syntax
+
+The token-level structure of a language. Lexical syntax can guide fine-grained reduction even when full parse-tree reduction is too coarse or expensive.
+
+## Validity
+
+The degree to which a candidate remains acceptable to the target tool. Validity may mean lexical validity, syntactic validity, semantic validity, or domain-specific well-formedness.
+
+Validity is not the same as interestingness: a candidate can parse successfully and still fail to preserve the target bug.
+
+## Semantic Validity
+
+The property that a candidate is meaningful according to language rules beyond grammar, such as name binding, type checking, scoping, or data-flow constraints.
+
+## Miscompilation
+
+A compiler bug where the compiler produces an executable or output that behaves incorrectly, often without crashing.
+
+## Differential Testing
+
+A testing method that compares the behavior of two or more tools, versions, configurations, or optimization levels. A difference may indicate a bug.
+
+## Flaky Failure
+
+A failure that does not reproduce consistently. Flaky failures make reduction difficult because the oracle may give different answers for the same candidate.
+
+## Timeout
+
+A time limit placed on an oracle command so that one candidate cannot stall the entire reduction.
+
+## Regression Test
+
+A test added after a bug is found and fixed, intended to prevent the same bug from reappearing.
+
+## Transformation
+
+An operation that changes a candidate, such as deleting a subtree, replacing an expression, simplifying a declaration, or applying a template-based rewrite.
+
+## Reduction Pass
+
+A phase of a reducer that applies a particular class of transformations or deletion strategies.
+
+## Pass Scheduling
+
+The strategy used to decide which reduction passes run, in what order, and how often.
+
+## Caching
+
+The practice of storing previous oracle results or intermediate reduction information so the reducer avoids redundant work.
+
+## Pairwise Program Reduction
+
+A reduction strategy that considers relationships between pairs of program elements, useful when the interesting behavior depends on interactions rather than isolated units.
+
+## Weighted Delta Debugging
+
+A delta-debugging variant that uses weights to guide which parts of an input should be reduced earlier or more aggressively. Also referred to as **WDD** (in the algorithm/paper) and **WeightDD** (in the Docker image distribution used by this book). Both names refer to the same technique.
+
+## Probabilistic Delta Debugging
+
+A family of delta-debugging approaches that uses probabilistic reasoning or randomized decisions to guide reduction.
+
+## LLM-Aided Program Reduction
+
+Program reduction that uses large language models to help guide reduction decisions, suggest transformations, or prioritize candidates.
+
+## Reducer Family
+
+A collection of tools, papers, and techniques that share a research lineage or design philosophy. In this book, the Perses family refers to Perses and later work that extends syntax-guided, language-agnostic, or transformation-guided reduction.
+
+## Perses
+
+The syntax-guided reducer this book is built around. Distinguished by its use of grammar-derived parse trees (in *Perses normal form*) and a priority-queue traversal that visits the largest subtree first [@perses]. Implementation at <https://github.com/uw-pluverse/perses>.
+
+## HDD
+
+Hierarchical Delta Debugging. Applies the ddmin algorithm level-by-level over a tree representation of the input rather than over flat chunks [@hdd]. **HDD\*** is the fixed-point variant — repeat HDD until no level produces further reductions — yielding 1-tree-minimality.
+
+## Picireny
+
+A grammar-aware hierarchical reducer that combines Picire (a Python ddmin framework) with ANTLR-derived parse trees [@picireny]. The conceptual peer of Perses on the grammar-driven branch of the syntax-guided lineage. Implementation at <https://github.com/renatahodovan/picireny>.
+
+## Vulcan
+
+A Perses-family reducer that pushes language-agnostic reduction closer to 1-minimality than baseline Perses by exploring removal sets larger than one node at a time [@perses-vulcan].
+
+## T-Rec
+
+A Perses-family reducer that operates at the *token* level rather than the parse-tree node level, giving finer-grained reductions while remaining language-agnostic [@perses-trec].
+
+## SFC
+
+Syntax-guided Function-call Coalescing — a Perses-family contribution that identifies missing syntax-guided transformations beyond pure deletion [@perses-sfc].
+
+## Latra
+
+A Perses-family framework for expressing reusable, template-based language-agnostic transformations [@perses-latra].
+
+## LPR
+
+LLM-aided Program Reduction — a Perses-family technique that uses large language models to prioritize promising reductions [@perses-lpr].
+
+## Pardis
+
+A priority-aware test-case reducer developed independently of the Perses lineage [@pardis]. Like Perses, Pardis traverses candidates in a priority order rather than uniformly.
+
+## J-Reduce
+
+A Java-specific reducer based on binary reduction of dependency graphs [@jreduce]. An example of a domain-specific reducer outside the Perses family.
+
+## EMI
+
+Equivalence Modulo Inputs — a compiler-testing technique that mutates the *unreachable* parts of a program at runtime and reports a bug if the mutated program produces different output. Related to but distinct from program reduction.
+
+## bugpoint / llvm-reduce
+
+LLVM's IR-level reducers. `bugpoint` is the legacy tool; `llvm-reduce` is the modern replacement. Both operate on LLVM intermediate representation rather than source code, illustrating that reduction is not limited to source-level inputs.
+
+## topformflat
+
+A small utility shipped with C-Reduce that splits a C/C++ source file by flattening nested blocks down to a chosen depth — useful as a preprocessing step that enables coarser line-level reductions.
+
+## cvise
+
+A maintained fork of C-Reduce with modernized infrastructure and additional language support [@cvise]. In current practice, most engineers reach for cvise rather than the original C-Reduce.

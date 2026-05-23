@@ -1,0 +1,18 @@
+/.quarto/
+/_book/
+/.DS_Store
+
+
+**/*.quarto_ipynb
+
+# Root-level PDF/LaTeX build artifacts
+/Program-Reduction-101.pdf
+/index.pdf
+/index.aux
+/index.fdb_latexmk
+/index.fls
+/index.log
+/index.toc
+/index.tex
+/.texmf-var/
+/.texmf-config/

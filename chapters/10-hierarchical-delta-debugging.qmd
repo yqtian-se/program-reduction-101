@@ -1,0 +1,92 @@
+# Hierarchical Delta Debugging
+
+Chapter 9 closed on the axes that distinguish reducers: size, speed, validity, generality, transformation power. The chapters that follow walk the design space along those axes, starting with the closest historical neighbor of Perses.
+
+When the input is a tree, the natural deletion unit is a subtree, not a line. Hierarchical Delta Debugging (HDD) makes that change and immediately improves on flat Delta Debugging for structured inputs.
+
+Classic Delta Debugging can operate over flat sequences of chunks. HDD changes the view: instead of reducing a program as plain text, it reduces a tree representation of the input [@hdd].
+
+## How HDD Works
+
+Programs are nested:
+
+```text
+function
+  block
+    declaration
+      expression
+    return_statement
+      expression
+```
+
+If a reducer can operate over this structure, it can try to remove meaningful units such as statements, declarations, and expressions. This often produces better candidates than deleting arbitrary lines or characters. For a compiler crash that occurs after parsing, this matters immediately: a candidate that removes a whole declaration may still parse; a candidate that removes half of the declaration's text probably will not.
+
+HDD turns that observation into an algorithm that reduces a tree level by level:
+
+1. Parse the input into a tree.
+2. Choose one level of the tree.
+3. Apply Delta Debugging to nodes at that level.
+4. Move to another level.
+5. Repeat until no useful reduction remains.
+
+The key move is simple: keep the Delta Debugging search idea, but change the reduction units from flat chunks to tree nodes.
+
+## Example
+
+Consider:
+
+```c
+int main(void) {
+  int x = 1;
+  int y = 2;
+  return x + y;
+}
+```
+
+At the statement level, HDD-like reduction may try removing:
+
+```c
+int x = 1;
+```
+
+or:
+
+```c
+int y = 2;
+```
+
+or:
+
+```c
+return x + y;
+```
+
+Each candidate is tested by the oracle. If removing a statement preserves the target behavior, the reducer keeps the smaller tree.
+
+The same example also shows the limit. Removing `int x = 1;` leaves `return x + y;`, which still has C syntax but no longer has a declaration for `x`. HDD improves the shape of candidates, but the oracle must still reject candidates that no longer reach the target behavior.
+
+## On the Running Example
+
+Applied to the 63-line `failure.c` from gcc-59903, an HDD-style reducer would first parse the C source into a tree (function definitions → blocks → statements → expressions → tokens), then attempt deletions level by level. At the top level it might try removing whole functions; the `safe_*` helper definitions are easy wins because nothing in the bug-triggering loop nest references them. At the statement level inside `func_129`, it would try removing individual loop bodies and assignments. Each removal is a candidate the oracle accepts or rejects.
+
+This is the same workflow Perses uses — HDD is the predecessor whose ideas Perses generalizes. The differences matter only when you push for the last few removals: HDD operates on whatever tree the parser produced; Perses transforms the grammar into a normal form that exposes lists as first-class reducible objects (Chapter 6), and uses a priority queue to attempt the largest subtree first rather than walking levels in order.
+
+## Strengths and Limitations
+
+HDD's main strength is structural awareness. It avoids some invalid candidates that plain text reduction would generate, and it gives a useful conceptual stepping stone:
+
+```text
+Delta Debugging: reduce a sequence
+HDD: reduce a tree
+Perses: reduce with grammar-guided syntax awareness
+```
+
+The original HDD paper also defines **HDD\***, a fixed-point variant that re-runs HDD until no level produces further reductions, giving a 1-tree-minimal result [@hdd]. Later refinements by Hodován, Kiss, and Gyimóthy generalize the level-by-level traversal and replace handwritten tree builders with grammar-driven parsing — the lineage that leads directly to Picireny (Chapter 12) [@picireny].
+
+Tree-based reduction is not enough by itself, though. A tree node can be syntactically meaningful but semantically necessary: removing a declaration may leave an unresolved variable; removing an expression may break a type constraint; removing one side of an interaction may change the failure. The quality of the tree also matters — a generic tree representation may not encode all the language information a reducer needs.
+
+## Relation to Perses
+
+Perses can be understood as part of the evolution from flat reduction toward language-aware reduction. HDD shows why structure matters. Perses makes grammar-derived syntax guidance central and aims to apply that idea across languages.
+
+The next chapter looks at C-Reduce, which took a different path from the same starting point: instead of pushing further on grammar-driven search, it layered dozens of language-specific transformation passes on top of a delta-debugging core. The contrast with the Perses line — generality through grammars versus power through targeted passes — is the throughline of Part III.

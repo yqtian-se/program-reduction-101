@@ -1,0 +1,148 @@
+# Test Oracles and Interestingness
+
+Chapter 2 introduced the division of labor Perses relies on: the reducer searches, but the test script decides what counts as success. The script is the oracle, and it defines the target of the whole reduction.
+
+A reducer that deletes content at random can easily produce a program that fails for the wrong reason — a parse error instead of the original crash, or a compile failure instead of a miscompilation. The evidence is gone, and the result is useless. The fix is an oracle: a script that defines exactly what behavior must survive. Write it wrong and Perses will faithfully minimize the wrong property.
+
+Perses repeatedly asks one question:
+
+> Is this candidate still interesting?
+
+The test script answers that question. In Perses, the script should exit with status code `0` when the candidate should be kept, and with a nonzero status code when the candidate should be rejected.
+
+This convention is simple, but it is one of the central ideas in the book. The reducer does not know what a compiler bug is. The script tells it which candidates still count as evidence.
+
+## A Simple Compiler-Crash Oracle
+
+Throughout Part I we use a single oracle for the gcc-59903 running example:
+
+```bash
+#!/usr/bin/env bash
+/compilers/gcc/4.8.2/bin/gcc -m32 -O3 small.c 2>&1 | grep -q "internal compiler error"
+```
+
+One line. It compiles the candidate with the buggy GCC and checks whether the
+ICE still appears. If it does, the candidate is interesting and Perses keeps it.
+If not, Perses discards it.
+
+This script is intentionally minimal — simple enough to read at a glance and
+reason about completely. Chapter 14 returns to gcc-59903 with the full
+differential oracle used in production, which also checks for undefined behaviour
+and verifies output equivalence across compilers. The full oracle is harder to
+write but harder to fool.
+
+The minimal script above is useful for teaching, but real compiler-testing workflows need more care. A better compiler-crash oracle usually checks three things:
+
+1. the candidate is accepted far enough to reach the target phase;
+2. the same failure signature is present;
+3. unrelated failures are filtered out.
+
+For example:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+workdir="$(mktemp -d)"
+trap 'rm -rf "$workdir"' EXIT
+
+stderr="$workdir/stderr.txt"
+
+timeout -s 9 10s my-compiler -O2 small.c >"$workdir/stdout.txt" 2>"$stderr" || true
+
+grep -q "internal compiler error" "$stderr"
+grep -q "SimplifyCFG" "$stderr"
+```
+
+This script does not merely check that the compiler failed. It checks for a specific kind of failure. That specificity matters because reduction can otherwise drift toward a smaller but different bug.
+
+**A note on filenames.** Perses does not pass the candidate as a command-line argument. Instead, before each oracle call it copies the current candidate into the working directory under the original input's filename — `small.c` in our examples — and then invokes the script with no arguments. Oracle scripts therefore reference the candidate by name (`small.c`), not via `"$1"`.
+
+## Interestingness Defines the Target
+
+In everyday language, a reduced program that crashes a compiler sounds "interesting." But for a reducer, interestingness is whatever the script says it is.
+
+The oracle defines the reduction target. If the script only checks for any nonzero compiler exit code, Perses may preserve a parse error instead of the original optimizer crash. The output will be small, but not useful.
+
+For example, this oracle is too weak:
+
+```bash
+gcc small.c || exit 0
+exit 1
+```
+
+Suppose the original target is an optimizer crash. During reduction, a candidate
+may become syntactically broken. GCC exits with a nonzero status, the weak oracle
+accepts the candidate, and Perses starts reducing toward a syntax error rather
+than the optimizer crash. The reducer did exactly what it was told; the oracle
+described the wrong target.
+
+A weak oracle usually fails in one of a few predictable ways. It may accept
+any compiler failure, so the result becomes a syntax error instead of the
+original optimizer crash. It may check only that *some* crash occurred, so the
+result preserves a different crash. It may ignore timeouts and accidentally
+keep candidates that hang. It may depend on external files, stale logs, random
+seeds, or shared state, so the result cannot be reproduced. Each of these
+mistakes gives the reducer a target, but not the target you meant.
+
+A good oracle is deterministic, specific, fast, and isolated from unrelated environment state. A weak oracle may preserve the wrong failure; a flaky oracle may mislead the search entirely.
+
+When the target is a compiler bug, a good oracle controls the environment,
+identifies the target failure, rejects misleading candidates, and stays cheap
+enough to run many times. Chapter 14 returns to these ideas when building a
+production-strength oracle.
+
+## Common Oracle Patterns
+
+### Crash Preservation
+
+Use this when the original failure is a crash or assertion failure.
+
+```bash
+timeout -s 9 10s compiler small.c 2>"$stderr" || true
+grep -q "Assertion.*failed" "$stderr"
+```
+
+### Differential Behavior
+
+Use this when two compiler versions or optimization levels disagree.
+
+```bash
+compiler-v1 small.c -o "$workdir/a" || exit 1
+compiler-v2 small.c -o "$workdir/b" || exit 1
+"$workdir/a" </dev/null >"$workdir/a.out" 2>&1 || exit 1
+"$workdir/b" </dev/null >"$workdir/b.out" 2>&1 || exit 1
+if diff -q "$workdir/a.out" "$workdir/b.out"; then
+  exit 1
+else
+  exit 0
+fi
+```
+
+For a differential oracle, the exit-code convention may need care: if difference is the interesting behavior, the script should return `0` when the outputs differ.
+
+The script should also reject setup failures. If either compiler fails to produce an executable, or either executable cannot run, the candidate has not demonstrated a behavioral difference; it has demonstrated that the comparison could not be run.
+
+### Diagnostic Preservation
+
+Use this when the bug is a specific warning, error, or analyzer report.
+
+```bash
+analyzer small.c >"$workdir/report.txt" 2>&1 || true
+grep -q "target diagnostic text" "$workdir/report.txt"
+```
+
+## Before You Run
+
+Before running Perses, ask:
+
+- Does the script return `0` only for the behavior I want to preserve?
+- Does it reject parse errors or unrelated failures?
+- Does it avoid depending on files outside the reduction workspace?
+- Does it use timeouts for commands that might hang?
+- Is the failure signature specific enough?
+- Can I run the script repeatedly on the original input and get the same result?
+
+Perses supplies the reduction strategy, but the oracle supplies the meaning of success. A strong oracle lets Perses search productively. A weak oracle gives Perses the wrong target.
+
+The first practical skill in program reduction is not installing a reducer. It is writing an oracle that says exactly what should survive. With that role clear, Chapter 4 can finally run Perses on the gcc-59903 example: one input file, one oracle, and one reducer searching for a smaller program.

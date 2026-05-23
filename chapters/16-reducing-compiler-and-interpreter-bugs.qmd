@@ -1,0 +1,81 @@
+# Reducing Compiler and Interpreter Bugs
+
+Not all compiler failures look alike. A crash, a miscompilation, and a parser assertion need different oracles — and using the same interestingness test for all three will silently accept the wrong failure.
+
+Reduction helps turn generated or discovered failures into small artifacts that developers can inspect, report, and preserve.
+
+## Common Failure Types
+
+| Failure Type | Oracle Target |
+| --- | --- |
+| Compiler crash | crash message, assertion, signal, stack pattern |
+| Parser bug | parser diagnostic or assertion |
+| Miscompilation | output difference between configurations |
+| Static-analysis false positive | specific diagnostic |
+| Interpreter crash | runtime crash signature |
+| Performance bug | bounded timeout or slowdown threshold |
+
+Each failure type needs a different oracle.
+
+The practical rule is simple: do not reuse a crash oracle for a miscompilation, a parser oracle for a performance bug, or a diagnostic oracle for a runtime failure without checking what behavior it actually preserves.
+
+## Crash Reduction
+
+Crash reduction is often the easiest starting point. The book's running example, gcc-59903, is exactly this case: GCC 4.8.2 hits an internal compiler error in the SimplifyCFG pass, and the oracle's job is to keep the candidate crashing in that specific pass.
+
+For gcc-59903 we used the one-liner from Chapter 3:
+
+```bash
+/compilers/gcc/4.8.2/bin/gcc -m32 -O3 small.c 2>&1 | grep -q "internal compiler error"
+```
+
+For a new crash, the template generalizes:
+
+```bash
+timeout -s 9 10s compiler -O2 small.c 2>"$stderr" || true
+grep -q "internal compiler error" "$stderr"
+grep -q "target-pass-name" "$stderr"
+```
+
+The challenge is avoiding drift to a *different* crash — the kind of failure Chapter 14's four-stage oracle is built to prevent. The minimum useful filter for a new crash bug is the pass name or assertion text from the original failure; the maximum is something like the gcc-59903 production oracle.
+
+## Miscompilation Reduction
+
+Miscompilations are harder.
+
+A typical oracle compares behavior. For example, suppose `small.c` prints `1`
+when compiled at `-O0`, but prints `0` when compiled at `-O2`. The interesting
+property is not a crash; it is the disagreement between two compiler
+configurations. The oracle should therefore preserve the output difference:
+
+```bash
+timeout -s 9 10s compiler -O0 small.c -o "$workdir/o0" || exit 1
+timeout -s 9 10s compiler -O2 small.c -o "$workdir/o2" || exit 1
+
+timeout -s 9 10s "$workdir/o0" </dev/null >"$workdir/o0.txt" 2>&1 || exit 1
+timeout -s 9 10s "$workdir/o2" </dev/null >"$workdir/o2.txt" 2>&1 || exit 1
+
+if diff -q "$workdir/o0.txt" "$workdir/o2.txt"; then
+  exit 1
+else
+  exit 0
+fi
+```
+
+This accepts candidates when the two compiled programs behave differently. It rejects candidates that fail to compile or fail to run, because those cases do not demonstrate a miscompilation.
+
+Miscompilation oracles need special care because undefined behavior, nondeterminism, and environmental dependencies can create false signals. Fix the input stream, locale, random seeds, and environment variables when they can affect output; otherwise the reducer may preserve a difference that comes from the environment rather than the compiler.
+
+For C and C++ programs, this often means first removing undefined behavior or using generator/tooling support that can detect it. Otherwise the reducer may preserve a difference that comes from the test program rather than the compiler.
+
+## Parser, Interpreter, and Other Front-End Failures
+
+Parser bugs often reduce well with syntax-guided reducers because the failure is close to syntax. The oracle typically checks for a parser assertion, a specific diagnostic, a crash in a front-end component, or a parser stack-frame pattern. Perses is a natural fit for these cases because grammar structure is directly relevant to the failure.
+
+Interpreter bugs shift the oracle from compile-time to run-time signals. The oracle may need to run the interpreter, capture stdout and stderr, check exit status, compare against an expected result, and control random seeds and environment variables so that repeated runs agree. The same patterns apply to JIT and dynamic-analysis bugs where the failure only surfaces during execution.
+
+## Turning a Reduction into a Regression Test
+
+A successful reduction often becomes a regression test. Before adding it to a test suite, check that the test is small enough to maintain, that it fails before the fix and passes after the fix, that it avoids relying on local paths or timing, that it includes the right compiler flags, and that the expected behavior is clear from the test alone.
+
+The choice of failure type determines the oracle, and the oracle determines what reduction can deliver. Chapter 17 looks at the next ratchet: when the failure is in a language Perses does not already support, what does it take to add a grammar and start reducing.

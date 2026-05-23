@@ -1,0 +1,66 @@
+# The Perses Family
+
+Perses answered one question cleanly: can a language-agnostic reducer use grammar structure? That success immediately surfaced the next five questions, which the papers in the Perses family now address.
+
+The core Perses idea is that a reducer can use grammar and syntax structure to remove or transform parts of a program while preserving validity more often than plain text-level reduction [@perses]. Later work asks what else can be improved: minimality, transformation power, speed, generality, and guidance from learned models. Perses is distributed under the GNU General Public License 3, with its implementation at <https://github.com/uw-pluverse/perses>.
+
+Treat the family as a map of recurring research pressures, not as a catalog to memorize.
+
+## A Research Family
+
+Most of the family below originates in Chengnian Sun's group at the University of Waterloo, with notable exceptions: HDD (Misherghi and Su at UC Davis), Picireny (Hodován, Kiss, and Gyimóthy at Szeged), and C-Reduce (Regehr et al. at Utah). Treating the family as one PI's research program is honest about its provenance; treating it as the field's only view of program reduction is not. Pardis [@pardis], ProbDD [@probdd], J-Reduce [@jreduce], and Herfert et al.'s tree reducer [@herfert2017] are concurrent threads outside this family that the book references where relevant.
+
+The Perses repository also contains implementations of techniques from a broader family of papers. A useful way to read this family is not as a list of disconnected tools, but as a sequence of answers to recurring reduction problems.
+
+| Reduction problem | Representative work | Main idea |
+| --- | --- | --- |
+| Plain deletion creates many invalid programs | Perses [@perses] | Use grammar and syntax to guide candidate generation |
+| The final result is valid but still larger than necessary | Vulcan [@perses-vulcan] | Push language-agnostic reduction closer to one-minimality |
+| The failure depends on relationships between program elements | PPR [@perses-ppr] | Preserve pairwise relationships during reduction |
+| Full grammar setup is too heavy for some users | Ad Hoc Syntax-Guided Program Reduction [@perses-adhoc] | Lower the cost of adopting syntax guidance |
+| The same expensive oracle work is repeated | Caching schemes [@perses-caching] | Avoid redundant tests and speed up reduction |
+| The reducer has little guidance about promising edits | LPR [@perses-lpr] | Use large language models to help prioritize reduction |
+| Coarse syntax units miss useful smaller edits | T-Rec [@perses-trec] | Use lexical syntax for finer-grained language-agnostic reduction |
+| Uniform search treats all chunks as equally promising | WDD [@perses-wdd] | Use weights to guide Delta Debugging decisions |
+| Probabilistic search needs clearer interpretation | CDD study [@perses-cdd] | Study probabilistic Delta Debugging behavior |
+| Deletion alone cannot express enough useful changes | SFC [@perses-sfc] | Identify missing syntax-guided transformations |
+| Transformation design is hard to reuse across languages | Latra [@perses-latra] | Use templates for language-agnostic transformations |
+
+## From Limitation to Research Question
+
+Each paper in the family starts from a practical pressure point. Perses makes syntax central, but syntax guidance alone does not solve every reduction problem. A reduced program may still contain removable structure. A failure may depend on two declarations appearing together. A slow oracle may dominate runtime. A grammar may be unavailable, incomplete, or hard to engineer. A syntax-aware reducer may still lack the transformation needed to expose a smaller explanation.
+
+Each paper turns a limitation into a design question. When you compare reducers, ask:
+
+- What unit is being reduced: text, tokens, tree nodes, declarations, or relationships?
+- What transformations are allowed: deletion only, replacement, rewriting, or template-based edits?
+- What does the oracle preserve: a crash, diagnostic, output difference, timeout, or semantic property?
+- What cost dominates the run: invalid candidates, oracle calls, search order, or transformation design?
+- What kind of minimality or usefulness does the result actually claim?
+
+## Which Tool for Which Situation
+
+The table above is organized by research problem. This one is organized by your situation — what you have, what is going wrong, and which Perses-family technique is most likely to help.
+
+| Your situation | Recommended technique | Why |
+|---|---|---|
+| Starting fresh with a structured language | Perses (baseline) | Good general starting point; built-in grammars for C, Java, Go, Python, and others |
+| Result is valid but still larger than necessary | Vulcan | Pushes harder toward 1-minimality than baseline Perses |
+| Bug only appears when two elements co-exist | PPR | Handles pairwise dependencies that independent deletion misses |
+| No ANTLR grammar available for your language | Ad Hoc or T-Rec | Ad Hoc lowers the grammar setup cost; T-Rec works at token level without a full grammar |
+| Oracle is slow (takes minutes per call) | Caching schemes | Avoids re-running the oracle on candidates the reducer has already seen |
+| Large search space, want smarter candidate ordering | LPR or WDD | LPR uses an LLM to prioritize likely-useful edits; WDD weights chunks by prior removal success |
+| Reduction stalls — nothing can be deleted further | SFC or Latra | SFC identifies missing transformations; Latra provides reusable template-based rewrites |
+| Reducing XML, JSON, or another non-C format | Perses with the right grammar | Language-agnostic design handles structured non-code inputs with the appropriate grammar |
+
+**A practical sequence.** For a new compiler bug, a reasonable starting point is:
+
+1. Run Perses with the simple one-liner oracle. If the result is good enough, stop.
+2. If the result is still large, strengthen the oracle (see Chapter 14) and run again.
+3. If oracle calls dominate the runtime, add caching.
+4. If the result is valid but not minimal, try Vulcan.
+5. If reduction stalls at a non-minimal point, try SFC or Latra for transformation-based cleanup.
+
+No single tool wins on every benchmark. The best tool for a given case depends on the oracle cost, the input structure, and whether the failure involves element interactions. Chapter 9 walks through concrete evaluation numbers from the WDD paper on the gcc-59903 example.
+
+The paper names matter less than the design space they sketch. When you encounter a new Perses-family technique, read it through three questions: what limitation of earlier reduction does it address, what is the key idea, and how would it change the way someone uses, evaluates, or extends a reducer? The same questions apply when deciding whether a future tool belongs in your workflow at all.

@@ -1,0 +1,123 @@
+# Evaluating Program Reducers
+
+A reducer paper that reports only final size is telling you half the story. Time, oracle calls, validity, generality, and whether the result is actually useful to a human all matter too. Evaluation starts by deciding what counts.
+
+A reducer may produce a smaller output, finish faster, preserve validity more often, require less language-specific setup, or be easier to use. These goals are related, but they are not the same.
+
+A good evaluation should ask:
+
+- How much smaller is the reduced input?
+- How long does reduction take?
+- How many oracle calls are needed?
+- How often are candidates syntactically valid?
+- How often are candidates semantically useful?
+- How much language-specific engineering is required?
+- Does the final output still preserve the intended failure?
+- Can another researcher reproduce the result?
+
+For a Perses-centered book, these questions help readers understand both the tool and the research literature.
+
+## What to Measure
+
+The most visible metric is final size. Common measures include:
+
+| Metric | What It Counts | Risk |
+| --- | --- | --- |
+| Bytes | Raw file size | Sensitive to formatting |
+| Lines | Source lines | Easy to manipulate with formatting |
+| Tokens | Lexical units | Requires tokenization |
+| Parse-tree nodes | Syntax structure | Requires parser support |
+| AST nodes | Semantic structure | Tool-specific |
+
+No single metric is perfect. A reducer can improve one metric while making another worse.
+
+Papers should report the metric explicitly. A result that is 90% smaller by bytes may look less impressive by parse-tree nodes, and a nicely formatted regression test may intentionally spend extra whitespace to make the failure readable.
+
+Reduction can be expensive because every candidate may require running a compiler, analyzer, solver, or test suite.
+
+Two runtime measures are especially important:
+
+- total wall-clock time;
+- number of oracle calls.
+
+Wall-clock time measures user experience. Oracle calls measure search cost more directly. Caching work in the Perses family matters because repeated oracle queries can dominate reduction time.
+
+A syntax-guided reducer should ideally generate fewer syntactically invalid candidates than a raw text reducer.
+
+Validity rate asks:
+
+> Of the candidates generated, how many are valid enough to reach the interesting behavior?
+
+This is not the same as success rate. A syntactically valid candidate may still fail the oracle because it does not preserve the target bug. But avoiding invalid candidates can make the search more efficient.
+
+Final size is useful, but the best reduced program is the one that helps someone understand the failure.
+
+For compiler testing, a high-quality reduction should:
+
+- preserve the same bug signature;
+- remove irrelevant generated noise;
+- be stable across repeated runs;
+- be small enough to inspect;
+- be suitable for a regression test;
+- include enough context to reproduce the failure.
+
+This human-facing idea of quality is harder to measure, but it is central to why reduction matters.
+
+Perses is language-agnostic, so generality is part of its value.
+
+Evaluation should therefore ask:
+
+- How many languages or formats can the reducer support?
+- What kind of grammar or parser infrastructure is needed?
+- How much per-language customization is required?
+- Does performance change significantly across languages?
+
+A reducer that performs well on one language may not be easy to adapt to another. A language-agnostic reducer trades some domain-specific power for broader applicability.
+
+## Reading Reducer Papers
+
+Reducer comparisons are easy to get wrong.
+
+A fair comparison should align:
+
+- the same original inputs;
+- the same oracle;
+- the same timeout policy;
+- the same size metric;
+- the same validity assumptions;
+- the same hardware or execution environment;
+- clear rules for failed reductions.
+
+If one reducer is allowed to use language-specific transformations and another is not, the comparison should say so explicitly.
+
+Fairness also includes the oracle. Comparing two reducers with different interestingness tests is usually comparing two different tasks, even if the original input is the same.
+
+When reading a reducer paper, ask:
+
+1. What benchmark inputs were used?
+2. What failures were preserved?
+3. How was final size measured?
+4. How many oracle calls were needed?
+5. Were invalid candidates counted?
+6. Was the comparison against strong baselines?
+7. Can the results be reproduced?
+
+These questions turn a paper from a list of claims into something a reader can evaluate.
+
+## Numbers from the WDD Evaluation
+
+Abstract evaluation criteria are easier to understand with real numbers. The following table shows results from the WDD evaluation [@perses-wdd] on gcc-59903, the running example of this book. T(s) is wall-clock time in seconds; S(tokens) is the number of tokens in the reduced result.
+
+| Algorithm | Time (s) | Tokens remaining |
+|---|---|---|
+| Perses + DD (baseline) | 4,815 | 497 |
+| Perses + WDD | 4,231 | 382 |
+| Perses + WProbDD | 3,020 | 300 |
+
+WDD reduces time by 12% and result size by 23% on this benchmark compared to the baseline. WProbDD goes further: 37% faster and 40% smaller. The mean improvement across all 31 C benchmarks in the WDD evaluation is positive in both dimensions, though gcc-59903 is at the larger end of the per-benchmark improvements — the full paper reports per-benchmark numbers and identifies cases where the gap is much smaller.
+
+These numbers illustrate two evaluation principles. First, size and speed can both improve when the search strategy changes — they are not always in tension. Second, one benchmark row is not a claim; the value of an evaluation is the pattern across many benchmarks, not any single number. The WDD paper reports the full table across all 31 C and 30 XML benchmarks.
+
+The table above compares variants within the Perses-WDD family. It does not pit Perses against C-Reduce, Picireny, Pardis, or ProbDD; those head-to-head numbers would require the same oracle, the same inputs, and the same hardware, and they are outside the scope of this book. The respective papers report some of these comparisons individually.
+
+Reducer evaluation is multidimensional. Smaller is important, but it is not the whole story. For Perses and its family, the central evaluation tradeoffs are size, speed, validity, generality, transformation power, and practical usefulness in compiler-testing workflows.

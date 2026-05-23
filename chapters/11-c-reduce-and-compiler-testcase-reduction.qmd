@@ -1,0 +1,63 @@
+# C-Reduce and Compiler Test-Case Reduction
+
+If you know the language, you can do more than delete syntax nodes. C-Reduce knows C, and it uses that knowledge to apply transformations that no grammar-agnostic reducer can — simplifying expressions, removing declarations, and collapsing control flow.
+
+C-Reduce is one of the most influential practical reducers for compiler testing, especially for reducing C and C++ programs generated during compiler testing workflows.
+
+## Why C-Reduce Matters, and How It Runs
+
+Compiler bugs often begin as large generated programs. A tool such as Csmith may produce a program that exposes a compiler crash or miscompilation. The generated input may be valid and valuable, but it is rarely pleasant to debug.
+
+C-Reduce helped show that aggressive, domain-aware program reduction can make compiler testing far more usable [@creduce]. The C-Reduce paper reported reductions of multi-thousand-line Csmith-generated programs to programs of fewer than ten lines — size reductions that grammar-guided deletion alone cannot typically achieve, because the final steps require expression simplification and declaration cleanup, not just subtree removal.
+
+The workflow itself resembles the Perses workflow:
+
+```text
+large failure-inducing C/C++ program
+        |
+        v
+interestingness test
+        |
+        v
+C-Reduce reduction passes
+        |
+        v
+small failure-inducing program
+```
+
+The reducer repeatedly applies transformations and keeps candidates that still satisfy the interestingness test.
+
+In practice, the command-line shape is familiar:
+
+```bash
+creduce ./test.sh failure.c
+```
+
+The script has the same responsibility it has with Perses: return success only when the candidate still demonstrates the target bug.
+
+## Domain-Specific Power
+
+C-Reduce ships a large library of reduction passes, many of which exploit deep C/C++ knowledge through Clang, LLVM, and related source-to-source tools. Typical transformations include removing declarations, simplifying expressions, deleting statements, replacing variables or constants, simplifying control flow, and using external tools to clean up code.
+
+Not all of C-Reduce's passes are language-specific. A subset — `topformflat`-driven line reduction, balanced-bracket deletion, blank-line collapsing — works on arbitrary text and is reusable. The deeply C-specific passes (Clang-AST-aware declaration removal, function inlining, type simplification) are what give C-Reduce its dramatic results on Csmith outputs.
+
+A second contribution of the C-Reduce paper is *pass scheduling*: deciding which passes run, in what order, and how often. The paper shows that pass scheduling — not any individual pass — accounts for much of C-Reduce's effectiveness compared to its predecessor Berkeley Delta [@berkeleydelta]. The actively maintained fork most engineers use today is **cvise** [@cvise], which inherits the same pass library with modernized infrastructure.
+
+This domain-specific power can produce excellent reductions. It also means that C-Reduce is not language-agnostic in the same way Perses aims to be.
+
+## A Useful Contrast with Perses
+
+| Dimension | C-Reduce | Perses |
+| --- | --- | --- |
+| Primary setting | C/C++ compiler-testcase reduction | Language-agnostic syntax-guided reduction |
+| Knowledge source | Domain-specific passes and tools | Grammars and syntax structure |
+| Strength | Very effective for C/C++ workflows | Broader language applicability |
+| Tradeoff | More language-specific engineering | Less deeply specialized for one language |
+
+This comparison is not about declaring one tool universally better; it is about understanding design tradeoffs. C-Reduce makes several tradeoffs visible: reduction quality depends heavily on transformation power; practical reducers need robust engineering, not only elegant algorithms; the oracle is central regardless of reducer design; compiler testing benefits enormously from reduced test cases; and language-specific knowledge buys depth at the cost of generality.
+
+**Honest comparison on output size.** The C-Reduce paper reports reductions to fewer than ten lines on Csmith-generated inputs of similar size to gcc-59903. Perses, on the same family of inputs, typically stops in the 20–30-line range — Chapter 4's run on `failure.c` ends at 26 lines. The gap is real: C-Reduce's expression simplification and declaration-cleanup passes can collapse structures that Perses, restricted to grammar-guided removal, must leave in place. Perses trades that last-mile smallness for language-agnosticism — the same engine reduces Java, Python, SMT-LIB, or Rust without new passes. When the output must be as small as possible *and* the input is C/C++, C-Reduce (or its maintained fork cvise [@cvise]) is usually the better tool. When the input is in a language without a C-Reduce backend, Perses is usually the only practical option.
+
+**Concretely, what C-Reduce can do that Perses cannot.** Take the 26-line Perses output from Chapter 4. Among the structures Perses leaves behind are the typedefs (`typedef int8_t;`, `typedef int32_t;`, `typedef uint32_t;`) and the `struct S0` field declarations. A C-Reduce pass like `pass_remove_unused_var` can identify that `f0` and `f1` are read but their *types* don't matter for the ICE — they could all be `int` — and a pass like `pass_remove_typedef` can fold the typedef chain entirely. Each of these is a *replacement*, not a deletion: the syntactic slot is preserved while the content shrinks. Perses, with deletion-only over parse trees, can only remove whole nodes; it cannot replace `int8_t` with `int` because that requires writing a token that wasn't in the original tree.
+
+Chapter 12 turns to Picireny, which sits between these two poles: its lineage comes from Picire, HDD, and coarse hierarchical delta debugging, and it takes its language knowledge from an ANTLR grammar rather than hand-written C/C++ passes. Together, C-Reduce, Picireny, and Perses sketch the three corners of the practical reducer design space: deeply language-specific, grammar-driven, and syntax-guided language-agnostic.

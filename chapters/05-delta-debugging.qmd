@@ -1,0 +1,136 @@
+# Delta Debugging
+
+If you can split a failing input in half and test each half separately, you can find the part that matters. Delta debugging turns that observation into a complete search algorithm, and almost every later reducer builds on it.
+
+> Try to remove parts of the input. Keep the removal if the interesting behavior survives.
+
+The original Delta Debugging work appeared as Zeller's "Yesterday, my program worked. Today, it does not. Why?" at ESEC/FSE 1999 [@zeller1999]; the canonical extended treatment is the 2002 TSE journal version by Zeller and Hildebrandt that named the **ddmin** algorithm and framed it as a systematic method for simplifying and isolating failure-inducing input [@zeller2002simplifying].
+
+## Intuition
+
+Imagine a failure-inducing input split into eight chunks:
+
+```text
+[A] [B] [C] [D] [E] [F] [G] [H]
+```
+
+The reducer asks whether some chunks are unnecessary. It might test the candidate with the first half removed:
+
+```text
+[E] [F] [G] [H]
+```
+
+If the bug still appears, then `[A] [B] [C] [D]` were not needed for preserving the failure. The reducer can keep the smaller candidate and continue reducing.
+
+If the bug disappears, the reducer learns something too: at least one removed chunk may be relevant, or the failure may depend on interactions between removed and retained chunks.
+
+This is the core loop:
+
+```text
+split input into chunks
+        |
+        v
+remove or keep selected chunks
+        |
+        v
+run the interestingness test
+        |
+        v
+if interesting, keep the smaller candidate
+        |
+        v
+repeat until no direct removal succeeds
+```
+
+## The Role of the Oracle
+
+Delta Debugging does not understand compiler bugs by itself. Like Perses, it depends on an oracle.
+
+For a compiler-testing case, the oracle might ask:
+
+- Does this candidate still crash the compiler?
+- Does it still reach the same assertion?
+- Does it still produce the same wrong-code behavior?
+- Does it still expose the same parser bug?
+
+The algorithm is only as precise as the oracle. If the oracle accepts any compiler error, the reducer may shrink the input into a syntax error. If the oracle checks the original crash signature, the reduced input is more likely to preserve the real bug.
+
+## The Search Mechanics
+
+The ddmin algorithm explores two kinds of candidates at each granularity.
+
+**Complement tests** remove one partition and keep the rest. "Can we delete this part?"
+
+```text
+candidate: [A] [B]     [D] [E] [F] [G] [H]
+removed:          [C]
+```
+
+**Subset tests** keep one partition and remove the rest. "Is this part alone enough?"
+
+```text
+candidate: [A] [B] [C] [D]
+removed:                 [E] [F] [G] [H]
+```
+
+ddmin tries complements first — they can shrink the input by one chunk in n oracle calls when a single partition is removable. If no complement succeeds, it tries subsets. If neither makes progress, it doubles the number of partitions (2 → 4 → 8 → ...) and starts over. The algorithm terminates when granularity reaches the size of the input and no further removal helps. Worst case is O(n²) oracle calls; common case is much less.
+
+The reducer's behavior also depends heavily on what counts as a chunk.
+
+| Granularity | Example Unit | Strength | Weakness |
+| --- | --- | --- | --- |
+| Character | `x`, `;`, `{` | Very fine-grained | Often creates invalid candidates |
+| Line | one source line | Easy to implement | Breaks multi-line syntax |
+| Token | identifier, keyword, operator | More language-aware | Still may break grammar |
+| Tree node | statement, expression, declaration | Syntax-aware | Requires parsing |
+
+Classic Delta Debugging can operate over many kinds of units, but the original idea does not require language syntax. This is both a strength and a limitation.
+
+Delta Debugging aims for a practical stopping condition called **one-minimality**: an input where removing any single remaining unit loses the target behavior. This is not the smallest possible interesting input — only that no single removal helps further. Chapter 8 defines minimality more precisely and explains why later Perses-family work pushes its limits.
+
+## Why Plain Delta Debugging Struggles with Programs
+
+Programs are structured artifacts. Plain deletion can break:
+
+- parentheses and braces;
+- statement boundaries;
+- expression syntax;
+- declarations needed by later uses;
+- type and scope constraints.
+
+Consider:
+
+```c
+int main(void) {
+  int x = 1 + 2;
+  return x;
+}
+```
+
+A text-level deletion might produce:
+
+```c
+int main(void) {
+  int x = 1 +
+  return x;
+}
+```
+
+The candidate is smaller, but it does not parse. If the original bug was in optimization, this candidate cannot preserve the target behavior.
+
+Later reducers often change the reduction unit for exactly this reason. Instead of deleting arbitrary text, they use syntax trees, grammars, or domain-specific transformations.
+
+## Why It Still Matters
+
+Many later reducers can be understood as refinements of this search idea:
+
+- changing the unit of reduction;
+- using syntax trees rather than raw text;
+- adding domain-specific simplification passes;
+- improving candidate ordering and pruning.
+
+Perses inherits the Delta Debugging spirit: propose candidates, test them, keep the successful reductions, and iterate. But Perses changes the search space by using syntax information. That one change makes the reducer much more suitable for programming-language inputs.
+
+On gcc-59903, a plain Delta Debugging reducer would split the 3,225-line C program into chunks and test halves. It would eventually find a smaller program, but generate many syntactically invalid candidates along the way — missing braces, incomplete declarations, broken expressions — each of which the compiler rejects before reaching the bug. Chapter 6 explains how Perses avoids most of those invalid candidates by using the C grammar to guide the search.
+
+Delta Debugging gives the basic reduction loop: generate a smaller candidate, ask the oracle whether it is still interesting, and keep it if the answer is yes. Perses builds on this tradition but uses syntax to avoid many invalid candidates and to make language-agnostic program reduction more practical.

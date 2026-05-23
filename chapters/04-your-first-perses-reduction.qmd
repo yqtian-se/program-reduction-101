@@ -1,0 +1,236 @@
+# Your First Perses Reduction
+
+Chapter 2 introduced Perses as the search tool. Chapter 3 explained the oracle's job. Now the two pieces come together: the same gcc-59903 example, a real oracle, Perses on real hardware, and the real output.
+
+## Why This Input?
+
+Chapter 1 showed the gcc-59903 example as a
+[3,225-line original input](https://github.com/uw-pluverse/perses/blob/master/benchmark/gcc-59903/orig.c)
+reduced to 26 lines. We start from a 63-line intermediate
+(`examples/stage1/failure.c`) — a partially reduced version of the same
+program that still triggers the ICE — rather than the full original.
+
+There are two reasons. First, the 63-line file finishes in around 16 seconds,
+which is fast enough to observe the complete workflow in one sitting. The full
+original takes considerably longer because Perses must make many more oracle
+calls to navigate from 3,225 lines to a fixed point. Second, the intermediate
+already triggers the same ICE — it is a valid starting point for the oracle, and
+the reduction it produces is the same 26-line result.
+
+Later chapters, especially Chapter 14 and Chapter 16, discuss strategies for
+running reduction on large generated inputs from scratch.
+
+## Set Up the Environment
+
+Run the steps below inside the
+[WeightDD Docker image](https://hub.docker.com/r/wddartifact/wdd).
+The image provides GCC 4.8.2, the exact compiler that triggers the bug,
+and Perses at a fixed version:
+
+```bash
+docker run --rm -it \
+  -v /path/to/examples/stage1:/work \
+  -w /work \
+  wddartifact/wdd bash
+```
+
+For long-term reproducibility — for example, when archiving a bug report
+or pinning the environment used in a paper — prefer the SHA digest:
+`docker pull wddartifact/wdd@sha256:<digest>`. The `:latest` tag may move.
+
+Replace `/path/to/examples/stage1` with the absolute path to the
+`examples/stage1/` directory in the book repository. After the container
+starts, the two files you need are:
+
+```
+failure.c      # the 63-line input
+test.sh        # the oracle
+```
+
+The Docker image matters for reproducibility. GCC 4.8.2 is not available
+in most package managers. Using the image means anyone with Docker can
+reproduce this exact reduction.
+
+## Step 1: Verify the Oracle
+
+Before running Perses, always verify that the oracle accepts the original
+input. This is not optional.
+
+```bash
+cp failure.c small.c
+bash test.sh
+echo $?   # expected: 0
+```
+
+The expected exit code is `0`. If you see `1`, the oracle is rejecting the
+input — either the environment is not set up correctly, the GCC path is wrong,
+or the oracle script has an error. Fix this before proceeding.
+
+**Why this step matters.** Perses starts from the assumption that the original
+input is interesting. If the oracle returns nonzero on the original, Perses has
+no valid starting point and will either error out or produce a meaningless
+result. Checking the oracle first takes five seconds and prevents a confusing
+failed run.
+
+Note that the oracle references `small.c` directly rather than receiving a
+filename argument. Perses copies each candidate into the working directory
+under the original input's filename before running the oracle, so `small.c`
+is always the current candidate being tested. We keep `failure.c` as the
+named source artifact in the repository, and use `small.c` as the working
+input inside the reduction run.
+
+## Step 2: Run Perses
+
+Inside the container, run:
+
+```bash
+java -jar /tmp/WeightDD/tools/perses_deploy.jar \
+  --test-script ./test.sh \
+  --input-file ./small.c \
+  --output-file ./failure_reduced.c
+```
+
+The three flags are the minimum Perses needs: `--test-script` points at the
+oracle that decides whether a candidate is interesting, `--input-file` is the
+failure-inducing program to reduce, and `--output-file` is where the reduced
+result is written.
+
+This command matches the Perses jar in the WDD artifact image used for the
+measurements below. If you use a different Perses release, run
+`java -jar perses_deploy.jar --help` first: current public Perses releases
+document `--output-dir` instead of `--output-file`.
+
+Perses prints progress to stderr as it works. The exact format depends on the
+Perses version, but the stream is useful for checking that the reducer is still
+making oracle calls and occasionally accepting smaller candidates.
+
+On the 63-line input used here, the benchmarked run takes **1,149 oracle
+queries** and finishes in around **16 seconds**.
+
+## Step 3: Understand What Perses Is Doing
+
+While Perses runs, it is executing the following loop:
+
+```
+parse small.c into a syntax tree
+repeat:
+    pick a subtree to try removing
+    write the candidate to small.c
+    run test.sh
+    if test.sh exits 0: keep the removal, update the tree
+    if test.sh exits nonzero: discard, try a different subtree
+until no removal improves the result
+write the final tree to failure_reduced.c
+```
+
+The syntax-guided part is what makes Perses different from a plain text
+reducer. Instead of trying to delete arbitrary byte ranges, Perses removes
+parse-tree nodes — whole statements, declarations, expressions, or blocks.
+Most candidates it generates are shaped like C programs, so the
+compiler is more likely to reach the relevant optimization pass rather than
+rejecting the input at the parser.
+
+Not every candidate is semantically valid. Removing a declaration while
+keeping its uses will produce a program that fails to compile for a different
+reason. The oracle catches these cases: a candidate that fails for the wrong
+reason exits nonzero, and Perses discards it and moves on.
+
+## Step 4: Inspect the Result
+
+After Perses finishes, `failure_reduced.c` contains:
+
+```c
+typedef int8_t;
+typedef int32_t;
+typedef uint32_t;
+struct S0 {
+  int8_t f0;
+  int8_t f1;
+  int32_t f3;
+};
+static g_81[];
+struct S0 g_152[];
+func_129(int32_t p_130, struct S0 p_131, uint32_t p_132) {
+  struct S0 l_151;
+  int32_t l_195;
+  for (; l_195; l_195 += 1)
+    for (p_132 = 0; p_132 <= 39; ++p_132) {
+      int32_t l_164;
+      for (p_131.f0 = 0; p_131.f0 <= 2; p_131.f0 += 1) {
+        g_152[0] = l_151;
+        l_151.f3 = g_81[p_131.f0];
+        struct S0 l_196;
+        l_195 = g_152[0].f3 && p_131.f1;
+        for (; l_164; l_164 += 1)
+          g_152[0] = l_196;
+      }
+    }
+}
+```
+
+26 lines, down from 63. Measured by tokens, the reduction goes from 381 tokens
+to 155 tokens, a 59% decrease.
+
+**What this result tells you.** The reduced program retains three specific
+ingredients: a struct `S0` with three typed fields, two global arrays, and a
+function with three nested loops that read and write those arrays. Everything
+else — the safe arithmetic helpers, the extra typedefs, the other functions —
+was irrelevant to the ICE. The GCC 4.8.2 optimizer at `-O3` crashes when it
+encounters this specific combination of struct field accesses and nested-loop
+structure. That is strong evidence about the structure needed to trigger the
+bug; it is not, by itself, a proof of the compiler's root cause.
+
+The generated C style is intentionally odd. Old C dialects and compiler-test
+generators can produce constructs such as implicit `int` declarations and terse
+typedefs that look strange in modern C. For now, focus on the shape
+Perses preserved: fields, arrays, and nested loops.
+
+This is what a useful reduction looks like: not just small, but small in a way
+that reveals the structure responsible for the failure.
+
+## Step 5: Verify the Result
+
+Always re-run the oracle on the reduced output:
+
+```bash
+cp failure_reduced.c small.c
+bash test.sh
+echo $?   # expected: 0
+```
+
+If the oracle returns `0`, the result is valid: the reduced program still
+triggers the same ICE. If it returns `1`, something went wrong — this
+should not happen with a deterministic oracle and a correct reduction, but
+if it does, check whether the oracle is flaky (Chapter 15) or whether the
+result file was written correctly.
+
+## When the Result Needs More Work
+
+Sometimes the first result is technically correct but not yet satisfying:
+
+| Symptom | Likely cause | Response |
+|---|---|---|
+| Output is still large | Oracle too weak, accepts unrelated failures | Strengthen the oracle (Chapter 14) |
+| Output is unreadable | Formatting collapsed | Run `clang-format` on the result |
+| Different failure preserved | Oracle checks nonzero exit, not specific ICE | Add `grep` for the exact crash message |
+| Reduction is slow | Oracle runs multiple slow tools | Add timeouts; use parallelism when safe; consider caching (Chapter 13) |
+| Result fails to reproduce | Oracle is flaky or environment-sensitive | See Chapter 15 |
+
+Running reduction in multiple stages is normal. A common workflow is: run
+Perses with a simple oracle to get a first reduction, strengthen the oracle
+based on what you see, then run again. Chapter 14 returns to this example
+with a four-stage production oracle that is much more precise than the
+one-liner used here.
+
+For a large real bug, the workflow often starts even earlier: first identify
+the failing revision with `git bisect`, then reduce the input that reproduces
+that revision-specific failure. Bisecting before reducing keeps the oracle
+focused on a concrete regression instead of asking the reducer to explain a
+moving target.
+
+A Perses reduction has three moving parts: the input program, the test
+script, and the reducer. The most common beginner mistake is to focus on
+the reducer before the oracle is reliable. Verify the oracle first, then
+run Perses, then inspect and verify the result. The result is not done when
+Perses finishes — it is done when you understand what the reduced program
+is showing you.

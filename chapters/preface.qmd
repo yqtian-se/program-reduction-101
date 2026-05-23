@@ -1,0 +1,36 @@
+# Preface {.unnumbered}
+
+When a software tool fails on a large input, almost none of that input is responsible for the failure. Program reduction finds the part that matters. The path here is deliberate: a concrete running example first, then the tools that shaped the field, then the research that keeps improving them.
+
+## How to Read
+
+Choose a path based on what you need first:
+
+- **New to reduction:** start with [Why Program Reduction Matters](01-why-program-reduction.qmd), then continue through [Meet Perses](02-meet-perses.qmd) and [Test Oracles and Interestingness](03-test-oracles.qmd). These chapters establish the basic motivation and the role of the interestingness test.
+- **Ready to run a reducer:** read [Test Oracles and Interestingness](03-test-oracles.qmd) first (the oracle convention is universal — every later chapter assumes it), then [Your First Perses Reduction](04-your-first-perses-reduction.qmd), then [Writing Robust Oracles](14-writing-robust-oracles.qmd). This path is for readers who want the workflow first and can return to the theory later.
+- **Reading for research context:** read [Delta Debugging](05-delta-debugging.qmd), [Perses and Syntax-Guided Reduction](06-perses-and-syntax-guided-reduction.qmd), and [The Perses Family](07-the-perses-family.qmd). These chapters connect classic reduction algorithms to the Perses research line.
+- **Need terminology or references:** use the [Glossary](glossary.qmd) and [Citing This Book and Perses](citing-this-book-and-perses.qmd).
+
+The book supports both linear reading and selective reading. If you skip ahead, keep one rule in mind: a reducer is only as useful as the oracle that defines what must be preserved.
+
+## Assumptions
+
+The book assumes basic familiarity with programming, command-line tools, and testing. It does not assume prior experience with compiler testing, grammars, parsing, or program reduction.
+
+When a term matters, the book defines it locally or records it in the glossary.
+
+## A Note on Vocabulary
+
+Three terms are used interchangeably throughout the book to refer to the same concept:
+
+- **oracle**
+- **test script**
+- **interestingness test**
+
+All three name the executable check that decides whether a candidate still demonstrates the target behavior. "Oracle" is the shortest and is what we use most often. "Test script" emphasizes that it is a literal shell file. "Interestingness test" is the original terminology from the delta-debugging literature.
+
+Similarly, the candidate input being tested is sometimes called a *candidate*, sometimes the *program*, sometimes the *input* — meaning is fixed by context.
+
+## Scope
+
+This is not a complete manual for every Perses option, and it is not a full literature survey of all program reducers. It is a guided introduction: enough theory to understand the problem, enough practice to run reductions, and enough research context to see why Perses and its family matter.

@@ -1,0 +1,122 @@
+# Minimality, Search, and Transformation Power
+
+A reducer that stops too early leaves work on the table — and most of the time it is the *transformation space*, not the input, that ran out first. The Perses family can be read as a sequence of attempts to push past that wall along three connected axes: how small the result becomes, how intelligently the reducer searches the candidate space, and what range of edits it can express. A reducer may fail to make progress not because the input is truly minimal, but because its current transformations cannot express the next reduction.
+
+## Deletion Is Not Enough
+
+Many reducers begin with deletion:
+
+```text
+remove this line
+remove this token
+remove this subtree
+```
+
+Deletion is the cheapest move, but some reductions require replacement or rewriting.
+
+Consider a fragment from the gcc-59903 intermediate (`failure.c`):
+
+```c
+g_80 = safe_rshift_func_uint16_t_u_u(
+         g_4,
+         safe_sub_func_uint32_t_u_u(g_4, ...));
+```
+
+A deletion-only reducer cannot remove the call expression without leaving an assignment with no right-hand side (`g_80 = ;`) — invalid C, rejected by the parser before the oracle ever sees the ICE. So deletion is stuck.
+
+A reducer that can *replace* the expression with a constant has another move:
+
+```c
+g_80 = 0;
+```
+
+Now the assignment parses, `g_80` is still written, and the surrounding code path reaches the optimizer pass that crashes. If the ICE does not depend on the specific computed value, this candidate passes the oracle — and the reducer can keep going. This is the move Perses cannot make on its own and C-Reduce makes routinely; it is one reason C-Reduce's outputs on Csmith inputs are smaller than Perses's (Chapter 11).
+
+## Search Strategy
+
+Search strategy decides which candidates are tried first.
+
+A reducer may prefer:
+
+- large removals before small removals;
+- syntax-tree nodes before tokens;
+- likely irrelevant code before likely relevant code;
+- transformations that historically succeed;
+- candidates suggested by learned models.
+
+Weighted and probabilistic Delta Debugging approaches belong to this space. They ask whether the reducer can use more information than a uniform search over chunks.
+
+## Transformation Power
+
+Transformation power is the set of changes a reducer can express.
+
+Weak transformation space:
+
+```text
+delete only
+```
+
+Stronger transformation space:
+
+```text
+delete
+replace
+simplify
+inline
+constant-fold
+template rewrite
+lexical simplification
+```
+
+More power can produce smaller results, but it also raises questions:
+
+- Are transformations safe?
+- Are they language-specific?
+- Do they preserve enough validity?
+- How expensive are they to try?
+- Can they be reused across languages?
+
+Transformation power is therefore not a free win. A reducer that can try many rewrites may find better outputs, but it also has more candidates to test and more ways to drift away from the intended failure if the oracle is weak.
+
+Reduction quality depends on more than the oracle. It also depends on what the reducer can try and the order in which it tries those things. The Perses family (Chapter 7) attacks all three forces: Vulcan pushes minimality, WDD weights the search and CDD studies the closely related Probabilistic Delta Debugging line [@probdd], and SFC/Latra/T-Rec expand the transformation space. Pardis [@pardis] approaches the search problem from a different angle — priority-aware reduction over the candidate space — making it a useful peer comparison for the WDD/CDD branch.
+
+## Six Design Axes
+
+"Which reducer is best?" is the wrong question; the useful one is "best for which language, which failure, which oracle, and which workflow?" Two reducers that look interchangeable on a benchmark table can diverge sharply the moment the oracle gets slow, the input loses its grammar, or the failure starts depending on a specific rewrite. Six axes decide which reducer fits which situation:
+
+| Design Axis | Key Question | Example Tradeoff |
+| --- | --- | --- |
+| Input model | Is the input text, tokens, a parse tree, or an AST? | Simpler input model versus better validity |
+| Language knowledge | Is the reducer language-specific or language-agnostic? | Specialization versus reuse |
+| Transformations | Can it only delete, or can it rewrite? | Simplicity versus smaller results |
+| Oracle use | How many candidate tests are needed? | Thorough search versus runtime |
+| Validity | Does it preserve syntax or semantics? | Practical speed versus deeper correctness |
+| Output quality | Is the result small, readable, and faithful? | Metric optimization versus human usefulness |
+
+Minimality, search, and transformation power are three of these axes; the other three — input model, oracle use, validity — interact with them. A reducer that switches input model from text to parse tree gains validity for free; one that drops to token-level loses some validity but gains search granularity.
+
+## Where Reducers Land on the Axes
+
+**Text reducers** (plain ddmin) are easy to implement and broadly applicable — they can work on almost anything that can be represented as a string — but they often produce invalid candidates for structured inputs such as programs. They remain useful when the input has no reliable grammar, or when the target artifact is genuinely line-oriented, such as a small configuration file or a plain-text log.
+
+**Syntax-guided reducers** (HDD, Picireny, Perses) use parse trees or grammars, and they fit programming languages, data formats, and structured specifications. Syntax alone does not guarantee semantic validity, but the practical advantage is that they spend less effort on candidates the parser would reject before the target tool can do meaningful work. The same axis appears outside Perses — Herfert, Patra, and Pradel reduce tree-structured test inputs directly [@herfert2017]; J-Reduce frames Java test-case reduction through dependency graphs rather than only surface syntax [@jreduce] — useful reminders that "structured input" can mean a parse tree, an AST, a dependency graph, or another representation chosen to match the failure.
+
+**Domain-specific reducers** (C-Reduce, cvise) use deep knowledge of one language or toolchain. Their strength is reduction power; their weakness is portability.
+
+**Language-agnostic reducers** (Perses, Picireny) reuse reduction strategies across languages — value comes from grammar-derived syntax information rather than handwritten per-language passes. The two families are complementary in practice: it is common to run a language-agnostic reducer first, then hand the result to a domain-specific one for the last mile.
+
+## Choosing a Reducer
+
+For a first decision, ask:
+
+| Situation | Likely Choice |
+| --- | --- |
+| You have a C/C++ compiler testcase | Try C-Reduce (or cvise) and Perses |
+| You have a grammar-supported language | Try Perses or another grammar-based reducer |
+| You have arbitrary text with no grammar | Try Delta Debugging-style reduction |
+| You need semantic-preserving rewrites | Look for domain-specific passes |
+| Your oracle is slow (seconds per call or more) | Prefer caching, parallelism, and careful search |
+
+No row in this table is a permanent rule. In a serious bug-reporting workflow, it is common to run one reducer first, strengthen the oracle, and then try a second reducer on the already smaller result.
+
+With the design space mapped, the next part of the book turns from "which reducer" to "how to deploy one safely" — robust oracles (Chapter 14), flaky or slow failures (Chapter 15), specific compiler-bug categories (Chapter 16), and adding language support when no grammar exists yet (Chapter 17).

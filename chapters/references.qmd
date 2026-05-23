@@ -1,0 +1,6 @@
+# References {.unnumbered}
+
+This page lists the works cited throughout the book.
+
+::: {#refs}
+:::

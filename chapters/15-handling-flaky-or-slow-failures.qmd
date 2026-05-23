@@ -1,0 +1,113 @@
+# Handling Flaky or Slow Failures
+
+A reducer that calls a flaky oracle is doing a random walk dressed up as a search. Reduction assumes the oracle gives reliable answers; the moment that assumption breaks — because the failure reproduces only sometimes, or only after a long-running pipeline, or only under a specific filesystem state — every accept/reject decision becomes noise.
+
+## Why Flakiness Hurts Reduction
+
+Suppose the same candidate sometimes passes the oracle and sometimes fails it.
+
+The reducer may:
+
+- keep a candidate that does not preserve the failure;
+- reject a candidate that should have been useful;
+- stop too early;
+- produce a final result that cannot be reproduced.
+
+Flakiness turns reduction into guesswork.
+
+## First Response: Stabilize the Environment
+
+Before adding clever reducer options, try to stabilize the oracle and shrink what it depends on:
+
+- fix random seeds;
+- isolate temporary directories;
+- remove network dependencies;
+- pin tool versions;
+- avoid shared mutable files;
+- control environment variables;
+- add timeouts;
+- warm up caches if needed.
+
+It also helps to reduce the environment before reducing the program. Can the failure be reproduced without a full test suite? Can the compiler command be simplified? Can includes or generated build files be stripped out? The smaller the surrounding environment, the easier — and the more deterministic — the reduction.
+
+## Repetition
+
+For flaky crash bugs, the oracle may run the target command multiple times.
+
+```bash
+passes=0
+
+for i in 1 2 3; do
+  if timeout -s 9 10s my-compiler small.c 2>"$workdir/err-$i.txt"; then
+    true
+  else
+    if grep -q "target failure" "$workdir/err-$i.txt"; then
+      passes=$((passes + 1))
+    fi
+  fi
+done
+
+test "$passes" -ge 2
+```
+
+This accepts a candidate if the target failure appears in at least two out of three runs.
+
+This pattern is for failures whose signal appears in stderr after a nonzero or
+signaled exit. Do not copy it blindly for miscompilations: a miscompilation
+oracle usually needs to compile and run two binaries, compare outputs, reject
+setup failures, and then repeat that whole comparison. Chapter 16 shows that
+shape explicitly.
+
+The tradeoff is cost. Repetition improves confidence but multiplies oracle time.
+
+It also changes the meaning of the oracle. The reducer is no longer preserving "this candidate always fails"; it is preserving "this candidate fails often enough under the chosen sampling rule." That may be the right compromise, but it should be recorded with the reduced artifact.
+
+## Slow Oracles and Timeouts
+
+Slow oracles are common in compiler testing. A single candidate may require compilation, execution, comparison, or solver runs. To trim cost, use the shortest compiler pipeline that still reaches the failure, avoid unnecessary optimization levels, cache expensive generated artifacts, prefer local files over network resources, and minimize logging once the oracle is debugged.
+
+Timeouts are not optional for serious reduction:
+
+```bash
+timeout -s 9 10s my-compiler small.c >out.txt 2>err.txt || true
+```
+
+A timeout prevents one bad candidate from stalling the entire reduction. The timeout value should be long enough for valid interesting candidates, but short enough to reject hangs. Choose the timeout from measurements on the original input, not from a guess. If the original usually takes two seconds, a ten-second timeout may be reasonable; if it sometimes takes nine seconds, that same timeout may turn normal variance into false rejection.
+
+The examples in this book use `timeout -s 9` so a timed-out command is killed
+hard. The `-s 9` option asks `timeout` to send SIGKILL when the time limit
+expires — heavy-handed, but the right default for reducer workloads with hung
+compilers or test binaries, because leftover child processes can corrupt later
+oracle calls. If the target needs cleanup handlers to run, use the default
+SIGTERM behavior instead and isolate each run carefully.
+
+This syntax assumes the Linux/GNU `timeout` command used inside the Docker
+benchmark environment. Stock macOS does not ship it; use the container or
+install GNU coreutils if you want to run these snippets locally.
+
+## Exit Status: Crashes Versus Diagnostics
+
+Exit status carries information beyond pass/fail. A Unix process that dies
+from a signal is usually reported as `128 + signal`; for example, SIGSEGV is
+commonly `139` and SIGABRT is `134`. Crash oracles should prefer a stable crash
+message or stack signature when available, but checking `[ "$?" -gt 128 ]` can
+help distinguish a signaled crash from an ordinary compiler diagnostic that
+exits non-zero through normal control flow.
+
+## Parallel Reduction
+
+Parallel reduction is the biggest wall-clock knob once the oracle is reliable.
+If your Perses build supports `--threads`, use it only after confirming the
+oracle is isolated: each run should write logs and temporary files under a
+private directory, not next to `small.c`. If several workers must share a
+cache or a generated artifact, protect that shared resource with a lock such
+as `flock`; otherwise parallel oracle calls can read each other's partial
+output.
+
+Check this against the exact Perses version you run. Some reducer builds
+isolate candidate workspaces per oracle call; others may reuse a working
+directory in ways that make current-directory outputs unsafe. The oracle
+should be correct under repeated sequential runs before you add parallelism,
+and then correct again under a small parallel dry run.
+
+Once the oracle is fast and deterministic, the harder problems in Chapter 16 — preserving a specific miscompilation, a parser bug, or a regression — become tractable. The opposite order rarely works.

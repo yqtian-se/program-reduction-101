@@ -1,0 +1,61 @@
+# Picireny and Grammar-Based Reduction
+
+A grammar is not only for parsing. It is also a map of what can safely be removed. Picireny uses that map to guide reduction in the same framework as HDD, but driven by an ANTLR grammar rather than a hand-built tree.
+
+Picireny is the hierarchical, grammar-based extension of Picire [@picire], an open-source Delta Debugging framework developed by Hodován and Kiss. It is described in Hodován, Kiss, and Gyimóthy's "Coarse Hierarchical Delta Debugging" [@picireny] and available at <https://github.com/renatahodovan/picireny>. It adds grammar awareness on top of Picire's base reduction loop: instead of reducing a flat sequence of tokens, it reduces parse-tree nodes derived from an ANTLR grammar.
+
+The shared idea is that grammars can guide reduction. If the reducer knows the language structure, it can remove or transform meaningful pieces instead of blindly deleting text.
+
+## Grammar-Based Reduction
+
+Most failing inputs that reach a reducer come out of a generator, a fuzzer, or a hand-authored test suite — and almost all of them are written in a language with a known grammar. A grammar-based reducer puts that grammar to a second use beyond parsing: it treats grammar productions, parse-tree nodes, and syntactic units as the units of reduction.
+
+The grammar may describe a programming language, a configuration format, a data format, a domain-specific language, or a solver input language. Whatever the surface syntax, the grammar gives the reducer a *map* of what can be removed as a unit. A reducer for SQL queries can remove clauses, expressions, joins, or predicates. A reducer for SMT-LIB can remove assertions or simplify terms. A reducer for JavaScript can remove statements or expressions. The grammar tells the reducer that a `WHERE` predicate is a removable unit, while deleting the middle of the keyword `SELECT` is meaningless.
+
+## Relation to Perses
+
+Perses and Picireny both sit in the world of syntax-aware reduction. The useful comparison is:
+
+| Question | Perses-Centered View |
+| --- | --- |
+| What structure guides reduction? | Grammar-derived syntax |
+| What does this avoid? | Many syntactically invalid candidates |
+| What remains hard? | Semantic validity, dependencies, transformation choice |
+| Why compare with Picireny? | To understand grammar-based reduction beyond one tool |
+
+## Grammar-Guided Reduction in Practice
+
+Consider a SQL query that triggers a bug in a database parser:
+
+```sql
+SELECT a, b, c FROM t WHERE x > 0 AND y < 10 ORDER BY a;
+```
+
+Without grammar knowledge, a text-based reducer tries deletions at character or line granularity. It might attempt to delete the middle of `WHERE`, producing `WHERE AND y < 10`, which the parser immediately rejects. Many oracle calls are wasted on invalid candidates.
+
+A grammar-based reducer sees the parse tree instead:
+
+```
+selectStatement
+  selectList: a, b, c
+  fromClause: t
+  whereClause
+    andExpr: x > 0, y < 10
+  orderByClause: a
+```
+
+Now the reducer can propose meaningful units:
+
+- Remove `ORDER BY a` entirely → the grammar says this is optional, so the candidate is well-formed.
+- Remove conjunct `y < 10` → the grammar says a `whereClause` can be a single expression.
+- Remove column `c` from the select list → the grammar says `selectList` can have fewer items.
+
+Each candidate is a grammatically valid SQL statement, which means the parser at least reaches the relevant code path before the oracle decides whether the bug is preserved.
+
+The grammar reduces wasted oracle calls by filtering candidates that cannot parse. It does not guarantee the candidate is semantically valid — a column reference might break after deletion — but those cases are caught by the oracle rather than by the reducer guessing.
+
+Picireny applies exactly this approach: ANTLR grammar rules define the reduction units, and the HDD algorithm traverses the parse tree to decide which subtrees to try removing. Once we have a grammar, the same machinery answers a family of related questions — which subtrees can be removed, which lists can be shortened, which alternatives can replace a construct, which tokens or lexical units matter — and those questions lead directly into the Perses-family work on lexical syntax, syntax-guided transformations, and language-agnostic transformation frameworks.
+
+The practical caution is that a grammar is only as useful as its fit to the inputs being reduced. If real inputs rely on extensions, preprocessing, or dialect-specific syntax, the reducer may reject useful starting points before reduction even begins — the same failure mode Chapter 17 returns to when Perses is asked to handle a new language.
+
+Chapter 13 picks up the next axis along this line: once the grammar is fixed, what separates reducers is how aggressively they search the candidate space and how willing they are to trade extra oracle calls for a smaller result.

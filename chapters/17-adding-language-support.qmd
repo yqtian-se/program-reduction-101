@@ -1,0 +1,99 @@
+# Adding Language Support
+
+Perses is language-agnostic, but not language-free. Syntax-guided reduction still needs grammar support, and when that support fits poorly, most of the syntax advantage evaporates: candidates fail to parse, reconstruction becomes unreliable, or the user may need a different reduction mode. Adding a language means making parsing, reconstruction, and the oracle work together.
+
+## What Language Support Provides
+
+Language support gives Perses lexical rules, grammar rules, parser integration, file-extension or language identification, source-reconstruction assumptions, and sometimes language-specific reduction configuration. The goal is to let Perses parse an input and reason about syntax-tree structure, so the central question for any new language or format is the same:
+
+> Can we parse this input reliably enough to reduce it?
+
+If the answer is yes, syntax-guided reduction becomes possible. If the grammar is incomplete, ambiguous, or mismatched with real-world inputs, reduction quality will suffer. A grammar that parses textbook JavaScript but not the extensions accepted by a particular engine may be fine for a tutorial and unusable for reducing that engine's bug reports.
+
+## Practical Checklist
+
+When adding or evaluating language support, ask:
+
+- Is there an existing grammar?
+- Does it parse real inputs from the target tool?
+- Are comments, whitespace, and preprocessing handled correctly?
+- Can the reduced output be reconstructed as valid source?
+- Does the target tool accept the reconstructed output?
+- Are there semantic constraints the grammar cannot capture?
+
+## Preprocessing Problems
+
+Some languages have preprocessors or macro systems. C and C++ are the obvious examples.
+
+A reducer may need to decide whether to reduce:
+
+- the original source;
+- preprocessed source;
+- generated intermediate source;
+- a minimized standalone file.
+
+Each choice changes the reduction problem.
+
+Preprocessed source is often easier to make standalone, but it can be much larger and less readable than the original. Original source is easier for humans to understand, but it may depend on includes, macros, generated files, or build flags that the reducer cannot see directly.
+
+For C and C++ bug reports, a practical first step is often to capture a
+standalone preprocessed file with `gcc -E` or `clang -E`, using the same include
+paths and macro definitions as the failing build. Reduce that file when
+reproducibility matters more than readability. If the final result is hard to
+understand, use the preprocessed reduction to identify the essential constructs
+and then rebuild a smaller original-source regression test by hand.
+
+## Syntax Support Is Not Semantic Support
+
+Adding grammar support does not mean the reducer understands the full language.
+
+The grammar can say:
+
+```text
+this is an expression
+this is a declaration
+this is a statement
+```
+
+But it may not know:
+
+- whether a variable is declared;
+- whether a type is valid;
+- whether overload resolution succeeds;
+- whether a module import exists;
+- whether a solver theory combination is meaningful.
+
+The oracle catches these issues indirectly by accepting only candidates that preserve the target behavior.
+
+## A Concrete Example: Reducing a Python File
+
+Perses infers language from the file extension. For a Python input, no extra flags are needed:
+
+```bash
+java -jar perses_deploy.jar \
+  --input-file failing_test.py \
+  --test-script test.sh \
+  --output-dir reduced-python
+```
+
+Perses selects its built-in Python grammar, parses the file as a Python parse tree, and proposes candidates by removing parse-tree nodes — statements, expressions, function bodies, class definitions.
+
+Now suppose the input is a custom configuration language not natively supported by Perses. The file extension `.myconf` is unknown, so built-in syntax guidance is not available. To get grammar-guided reduction, provide an ANTLR4 grammar:
+
+```antlr
+grammar MyConf;
+config   : section+ EOF ;
+section  : '[' ID ']' setting* ;
+setting  : ID '=' value ';' ;
+value    : STRING | INT | ID ;
+```
+
+With the grammar integrated into the reducer configuration, Perses can propose candidates that remove whole sections or individual settings — valid according to the grammar — rather than trying arbitrary text deletions.
+
+The grammar file is only one part of that integration. A real language-support patch also needs to tell Perses how to select the grammar for `.myconf` files, how to invoke the generated parser, and how to reconstruct source text after tree edits. Those engineering details vary by Perses version, but the conceptual contract is stable: parse the input, reduce syntax-tree structure, print a candidate the target tool can read, and let the oracle decide whether the behavior survived.
+
+The practical payoff is visible when the target tool is a parser or an interpreter that rejects malformed input early: syntax-guided candidates reach the interesting code path more often, so fewer oracle calls are wasted.
+
+**What to check before adding a grammar.** Run the grammar against a sample of real inputs. If the grammar parses fewer than 90% of realistic inputs without errors, reduction quality will suffer: many candidates will be rejected at the parsing step regardless of their oracle value.
+
+Adding language support means giving Perses enough syntax knowledge to generate meaningful candidates. The better the parser and grammar match real inputs, the more useful syntax-guided reduction becomes.

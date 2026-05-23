@@ -1,0 +1,119 @@
+# Open Problems
+
+Program reduction is practical enough to use in production workflows. It is not finished.
+
+The Perses family exists because each improvement exposes the next question. Better syntax guidance raises questions about semantic validity. Better minimality raises questions about transformation power. Better search raises questions about cost and reproducibility.
+
+## Semantic Validity
+
+Syntax-guided reduction can preserve grammar structure, but many failures require semantic validity.
+
+Open questions:
+
+- How much semantic knowledge can a language-agnostic reducer use?
+- Can semantic constraints be learned or inferred cheaply?
+- How should reducers handle name binding, type checking, modules, and imports?
+
+A practical example is declaration reduction. Removing a declaration may keep the parse tree well-formed while breaking every later use of the declared name. A language-agnostic reducer needs a way to benefit from syntax without pretending that syntax is the whole language.
+
+## Transformation Completeness
+
+Deletion alone is not enough.
+
+Open questions:
+
+- Which transformations are most important across languages?
+- Can transformations be expressed in reusable templates?
+- How can a reducer avoid unsafe or misleading rewrites?
+- How should transformation power be evaluated?
+
+## Oracle Cost
+
+Many reductions are dominated by oracle calls.
+
+Open questions:
+
+- Which caching schemes are most effective across workloads?
+- Can reducers predict uninteresting candidates before running the oracle?
+- How should reduction exploit parallelism?
+- How can slow oracles be made more reduction-friendly?
+
+## Flaky and Probabilistic Failures
+
+Real failures are not always deterministic.
+
+Open questions:
+
+- How should reducers handle nondeterministic oracles?
+- How many repeated runs are enough?
+- Can probabilistic reduction provide useful confidence bounds?
+- How should final artifacts be validated?
+
+The research challenge is not only accepting noisy evidence during search. It is also explaining the confidence of the final reduced artifact to a maintainer who needs to reproduce the bug.
+
+## Human Usefulness
+
+The smallest program is not always the most useful one.
+
+Open questions:
+
+- How can reducers optimize readability?
+- Should formatting be part of reduction?
+- Can reducers preserve explanatory structure?
+- How should human usefulness be measured?
+
+## LLM-Aided Reduction
+
+Large language models introduce a new source of guidance.
+
+Open questions:
+
+- Can models predict which code is irrelevant?
+- Can they suggest transformations that preserve validity?
+- How should reducers validate model-suggested changes?
+- How can LLM guidance remain reproducible?
+
+For reduction, model suggestions are useful only if the reducer can validate them with the oracle and record enough information for another run to be understood. Otherwise the guidance becomes another source of nondeterminism.
+
+## Beyond Source Code
+
+Most reduction research targets source-level programs. But the same problem appears at every level of the toolchain.
+
+Open questions:
+
+- How should reducers handle compiler IR, bytecode, or object files? LLVM ships `llvm-reduce` and `bugpoint` for IR; what would a language-agnostic IR reducer look like?
+- Can reduction techniques transfer to neural network models, container images, or build configurations?
+- What is the right cost measure for a reduced binary or bytecode artifact when bytes and instructions both matter?
+
+## Multi-Property and Differential Reduction
+
+Real bug reports often need to preserve more than one property. A regression test may need to preserve a crash *and* a warning, or an output difference *and* the absence of undefined behavior.
+
+Open questions:
+
+- How should a reducer balance multiple oracles whose answers may conflict?
+- How does Equivalence Modulo Inputs (EMI) testing — which reduces one program by mutating around a fixed core — relate to traditional reduction?
+- Can a reducer report which oracle stops further progress, so users know what to relax?
+
+## Generalization After Reduction
+
+A reduced program explains one failure. A *pattern* explains a class of failures.
+
+Open questions:
+
+- Can a reducer synthesize a template that generalizes the reduced result to a family of related crashes?
+- Can reduced artifacts feed back into fuzzers as seed inputs, closing the loop between bug-finding and bug-explaining?
+- What does "minimality" mean for a generalized template versus a single test case?
+
+## Benchmarks and Reproducibility
+
+Reducer research needs strong benchmarks.
+
+Open questions:
+
+- What benchmark suites represent real compiler-testing workloads?
+- How should failures, oracles, and reduced outputs be archived?
+- How should papers report unsuccessful reductions?
+- How can we compare language-specific and language-agnostic reducers fairly?
+
+The future of program reduction is not only smaller outputs. It is better validity, richer transformations, faster search, stronger evaluation, and reduced programs humans can use without a guide.

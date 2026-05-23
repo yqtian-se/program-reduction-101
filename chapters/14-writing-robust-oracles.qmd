@@ -1,0 +1,199 @@
+# Writing Robust Oracles
+
+Getting the oracle wrong is worse than getting the reducer wrong. A bad reducer is slow; a bad oracle sends the entire search toward the wrong target. The job is to make the target specific, repeatable, and hard to fool.
+
+A reducer can be clever, syntax-guided, cached, parallel, and transformation-rich. None of that matters if the oracle accepts the wrong behavior.
+
+A robust oracle has three properties: it preserves only the intended failure, it answers the same way on the same input every time, and it stays cheap enough to run thousands of times. The rest — isolation from environment state, defenses against hangs, logging that survives failure — follows from those three.
+
+## Returning to gcc-59903: The Full Oracle Dissected
+
+Writing an oracle for a C compiler bug is harder than it first appears. A correct oracle must answer three questions: *Is this a valid program?* (a UB-heavy candidate can crash the compiler for the wrong reason); *does it trigger the target bug?* (a syntax error or missing include also exits nonzero); and *is the failure reproducible?* (a 70% flaky failure poisons every accept/reject decision). The four-stage oracle below is one implementation of all three answers for gcc-59903.
+
+In Chapter 3 we used a one-liner oracle for gcc-59903:
+
+```bash
+/compilers/gcc/4.8.2/bin/gcc -m32 -O3 small.c 2>&1 | grep -q "internal compiler error"
+```
+
+That script is correct for teaching purposes, but the oracle used in production
+for this bug is much more careful. The production workflow has four gates:
+
+```text
+reject undefined behavior
+        |
+        v
+establish a reference execution
+        |
+        v
+check that a trusted compiler agrees
+        |
+        v
+confirm that the buggy compiler still crashes
+```
+
+The snippets below are annotated excerpts from the WeightDD-style `r.sh`
+oracle rather than a complete standalone script. They show the design, but a
+runnable Stage 2 reproduction still needs the full benchmark input, compiler
+paths, flags, and environment.
+
+**Stage 1 — Reject programs with undefined behavior.**
+
+```bash
+BADCC=("gcc-4.8.2 -m32 -O3")
+GOODCC=("ccomp -fall")
+TIMEOUT=30
+CFILE=small.c
+
+if ! timeout -s 9 $TIMEOUT clang-7.1.0 -pedantic -Wall -Wsystem-headers -O0 -c "$CFILE" >out.txt 2>&1; then
+  echo "oracle setup failed during UB filtering" >&2
+  exit 2
+fi
+
+if grep -q 'incompatible redeclaration' out.txt ||
+   grep -q 'division by zero' out.txt; then
+  exit 1
+fi
+
+# ... 20+ more UB-pattern checks ...
+
+if ! timeout -s 9 $TIMEOUT gcc-7.1.0 -Wall -Wextra -O0 "$CFILE" >outa.txt 2>&1; then
+  echo "oracle setup failed during UB filtering" >&2
+  exit 2
+fi
+
+if grep -q 'control reaches end' outa.txt; then
+  exit 1
+fi
+```
+
+This stage runs both clang and gcc with strict warnings and rejects candidates
+that exhibit undefined behavior. The setup check is deliberately separate from
+the UB-pattern checks: if clang or gcc is missing, the oracle reports a setup
+failure instead of quietly treating every candidate as uninteresting. Why does
+UB matter? Because a program with UB can produce different outputs on different
+compilers for reasons that have nothing to do with the bug. UB-free programs
+give us a clean comparison baseline. This pattern comes from the C-Reduce
+testing philosophy [@creduce].
+
+**Stage 2 — Establish a reference execution.**
+
+```bash
+timeout -s 9 $TIMEOUT $CLANGFC $CFLAG $CFILE || exit 1
+# $CLANGFC = "clang-7.1.0 -O0 -fwrapv -ftrapv -fsanitize=undefined,address"
+timeout -s 9 $TIMEOUT ./t >out0.txt 2>&1 || exit 1
+```
+
+The candidate is compiled with clang sanitizers at `-O0` and executed. The
+output is saved as the reference. If compilation or execution fails here, the
+candidate is rejected — we cannot safely use it as a comparison baseline.
+
+**Stage 3 — Verify the good compiler agrees.**
+
+```bash
+for cc in "${GOODCC[@]}" ; do
+  timeout -s 9 $TIMEOUT $cc $CFLAG $CFILE || exit 1
+  timeout -s 9 $TIMEOUT ./t >out1.txt 2>&1 || exit 1
+  if ! diff -q out0.txt out1.txt >/dev/null ; then
+    exit 1
+  fi
+done
+```
+
+CompCert (`ccomp`) is a formally verified C compiler. If the candidate
+produces different output under CompCert than under the sanitized clang, the
+candidate exhibits a real behavioral difference — but it may not be a gcc bug.
+We reject it to keep the signal clean.
+
+**Stage 4 — Confirm the buggy compiler fails.**
+
+```bash
+for cc in "${BADCC[@]}" ; do
+  timeout -s 9 $TIMEOUT $cc $CFLAG $CFILE >out.txt 2>&1
+  if ! grep 'internal compiler error' out.txt ; then
+    exit 1
+  fi
+done
+exit 0
+```
+
+Only now do we check for the ICE. The oracle returns `0` only when all four
+stages pass: the program is UB-free, it compiles and runs cleanly under
+sanitizers, it matches CompCert's output, and it makes gcc-4.8.2 crash.
+
+**What the simple oracle misses.**
+
+The one-liner from Chapter 3 checks only Stage 4. That is enough to run a
+reduction and get a result. But without Stages 1–3, Perses can drift:
+
+- toward programs that are UB-heavy (which happen to also crash gcc, but for the wrong reason);
+- away from the actual bug if a smaller program satisfies the ICE check by accident.
+
+The four-stage oracle keeps the signal honest. The cost is speed: each oracle
+call now runs three compilers instead of one. The simplified oracle is good for
+the first reduction walkthrough; the full oracle is the safer production target.
+
+## A Robust Shell Template
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+workdir="$(mktemp -d)"
+trap 'rm -rf "$workdir"' EXIT
+
+stdout="$workdir/stdout.txt"
+stderr="$workdir/stderr.txt"
+
+timeout -s 9 10s my-compiler -O2 small.c >"$stdout" 2>"$stderr" || true
+
+grep -q "internal compiler error" "$stderr"
+grep -q "target-pass-name" "$stderr"
+```
+
+The template combines five habits: a temporary working directory, a `trap` that cleans up on exit, captured stdout/stderr, a timeout, and a specific failure signature. Each is visible in the script above. During early oracle development, keep enough information to debug failures: the compiler command, exit code, stdout and stderr, timeout status, working directory layout, and candidate path. Once the oracle is stable, logs can be minimized for speed. The next chapter returns to timeout semantics, signal handling, and parallel oracle execution — operational concerns that matter once the oracle itself is correct.
+
+## Common Pitfalls
+
+Chapter 3 showed why a weak-success oracle (`my-compiler small.c || exit 0`) lets reduction drift toward syntax errors. Two more pitfalls are worth flagging here.
+
+**Writing to the current directory.** Oracles often write `err.txt` next to the candidate. If a previous run leaves a stale `err.txt` and the current run fails to write a new one (e.g., the compiler hangs and times out), `grep` reads the old file and silently accepts a wrong candidate. Always write logs inside `$workdir` and clean up on exit.
+
+**Trusting environment success.** If a tool the oracle depends on (clang, a sanitizer, a comparison binary) is missing or broken, a chained `&&` can short-circuit into `exit 1` — a *false rejection*. The oracle now blames every candidate for an environment problem. Run the oracle once with verbose logging before reduction starts.
+
+Before reduction, always run:
+
+```bash
+cp original.c small.c
+bash test.sh
+echo $?
+```
+
+The result should be `0`. If the original input does not satisfy the oracle, the reducer has no valid starting point.
+
+Then run it several times:
+
+```bash
+for i in 1 2 3 4 5; do
+  cp original.c small.c
+  bash test.sh
+  echo "run $i: $?"
+done
+```
+
+Repeated success helps detect flakiness before the reducer wastes time.
+
+For compiler testing, "same failure" may mean:
+
+- same assertion text;
+- same compiler pass name;
+- same signal;
+- same stack-frame pattern;
+- same diagnostic ID;
+- same output mismatch.
+
+Choose the strongest stable signature available.
+
+The word stable matters. A full stack trace may include line numbers that change between builds, while a pass name or assertion message may be stable enough for reduction.
+
+A robust oracle is specific, deterministic, isolated, and fast. Perses supplies the reduction engine, but the oracle defines the meaning of success.
