@@ -51,6 +51,18 @@ In each case, the goal is not only to reproduce the failure,
 but to find a small artifact that still explains it.
 
 ```{=html}
+<figure class="landing-illustration">
+  <img
+    src="assets/program-reduction-overview.png"
+    alt="A large failing program flows through a reducer and a test loop to become a small failure witness, which helps debugging, bug reports, and regression tests."
+    loading="lazy">
+  <figcaption>
+    Program reduction keeps the failure while removing everything that does not help explain it.
+  </figcaption>
+</figure>
+```
+
+```{=html}
 <hr class="landing-divider">
 <p class="landing-h">What You Will Learn</p>
 <p class="landing-sub">Practice, theory, and research — all connected through Perses.</p>
